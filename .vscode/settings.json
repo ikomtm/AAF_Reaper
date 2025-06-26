@@ -49,6 +49,11 @@
         "xmemory": "cpp",
         "xstring": "cpp",
         "xtr1common": "cpp",
-        "xutility": "cpp"
+        "xutility": "cpp",
+        "map": "cpp",
+        "xtree": "cpp",
+        "fstream": "cpp",
+        "iomanip": "cpp",
+        "vector": "cpp"
     }
 }

@@ -12,6 +12,8 @@ link_directories("C:/Users/KSN_PC/C++Projects/AAF_Reaper/AAF_SDK_devel/x64/Relea
 
 add_executable(aaf_reader main.cpp)
 
+
+
 # Линкуем необходимые библиотеки
 target_link_libraries(aaf_reader AAF AAFIID ole32 uuid)
 
