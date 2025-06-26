@@ -42,6 +42,7 @@ std::string formatMobID(const aafMobID_t& mobID) {
     return std::string(buffer);
 }
 
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr << "❌ Usage: aaf_reader <file.aaf>" << std::endl;
@@ -131,9 +132,9 @@ int main(int argc, char* argv[]) {
                                                 aafSourceRef_t ref;
                                                 if (SUCCEEDED(pClip->GetSourceReference(&ref))) {
                                                     std::cout << "     📌 Clip #" << compIndex++
-                                                              << ": Start=" << ref.startTime
-                                                              << ", TrackID=" << ref.sourceTrackID
-                                                              << ", MobID=" << formatMobID(ref.sourceID) << "\n";
+                                                        << ": Start=" << ref.startTime
+                                                        << ", TrackID=" << ref.sourceTrackID
+                                                        << ", MobID=" << formatMobID(ref.sourceID) << "\n";
                                                 }
                                                 pClip->Release();
                                             } else {
