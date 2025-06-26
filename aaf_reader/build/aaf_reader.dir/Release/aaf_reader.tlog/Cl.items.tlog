@@ -1,1 +1,5 @@
-C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\main.cpp;C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\build\aaf_reader.dir\Release\main.obj
+C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\main_new.cpp;C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\build\aaf_reader.dir\Release\main_new.obj
+C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_utils.cpp;C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\build\aaf_reader.dir\Release\aaf_utils.obj
+C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_parser.cpp;C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\build\aaf_reader.dir\Release\aaf_parser.obj
+C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\media_utils.cpp;C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\build\aaf_reader.dir\Release\media_utils.obj
+C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\csv_export.cpp;C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\build\aaf_reader.dir\Release\csv_export.obj

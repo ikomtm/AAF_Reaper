@@ -54,6 +54,7 @@
         "xtree": "cpp",
         "fstream": "cpp",
         "iomanip": "cpp",
-        "vector": "cpp"
+        "vector": "cpp",
+        "algorithm": "cpp"
     }
 }

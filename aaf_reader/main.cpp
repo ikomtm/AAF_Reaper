@@ -19,6 +19,7 @@
 #include <vector>
 #include <filesystem>
 #include <memory>
+#include <set>
 
 // Простые структуры для экспорта в CSV
 struct AudioClipData {
@@ -67,6 +68,27 @@ struct ProjectData {
                    channelCount(2), sessionStartTimecode(0.0), 
                    timecodeFormat("25fps"), totalLength(0.0) {}
 };
+
+// Объявления функций
+void processAudioComponentWithPosition(IAAFComponent* pComp, std::ofstream& out, int compIndex, 
+                                      aafPosition_t startPosition, 
+                                      const std::map<std::string, std::string>& mobIdToName, 
+                                      const aafRational_t& editRate,
+                                      int& audioClipCount, int& audioFadeCount, int& audioEffectCount);
+
+void extractClipsFromSegment(IAAFSegment* pSegment, const std::map<std::string, std::string>& mobIdToName,
+                           const aafRational_t& editRate, aafPosition_t sessionStartTC,
+                           aafPosition_t currentPosition, AudioTrackData& trackData,
+                           IAAFHeader* pHeader, std::ofstream& out);
+
+bool isAudioTrack(IAAFMobSlot* pSlot);
+std::string getDataDefName(IAAFDataDef* pDataDef);
+std::string formatMobID(const aafMobID_t& mobID);
+std::string findAndExtractEssenceData(IAAFHeader* pHeader, const aafMobID_t& mobID, 
+                                     const std::string& mobIdStr, std::ofstream& out);
+void createExtractedMediaFolder();
+void extractEmbeddedAudio(IAAFEssenceData* pEssenceData, const std::string& outputPath);
+void processAudioFiles(const ProjectData& projectData, const std::string& outputDir);
 
 std::string wideToUtf8(const std::wstring& wstr) {
     std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> conv;
@@ -453,313 +475,6 @@ void processComponent(IAAFComponent* pComp, std::ofstream& out, int compIndex,
     }
 }
 
-// Объявления функций для экспорта
-void extractClipsFromSegment(IAAFSegment* pSegment, const std::map<std::string, std::string>& mobIdToName,
-                           const aafRational_t& editRate, aafPosition_t sessionStartTC, 
-                           aafPosition_t currentPosition, AudioTrackData& trackData, 
-                           IAAFHeader* pHeader, std::ofstream& out);
-
-void extractClipFromComponent(IAAFComponent* pComp, const std::map<std::string, std::string>& mobIdToName,
-                            const aafRational_t& editRate, aafPosition_t sessionStartTC,
-                            aafPosition_t position, AudioTrackData& trackData,
-                            IAAFHeader* pHeader, std::ofstream& out);
-
-// Структура для хранения аудио параметров
-struct AudioParams {
-    bool hasGain = false;
-    double gainValue = 0.0;
-    bool hasPan = false;
-    double panValue = 0.0;
-    bool hasVolume = false;
-    double volumeValue = 1.0;
-    std::string effectName = "";
-};
-
-// Функция для извлечения параметров из OperationGroup
-AudioParams extractAudioParams(IAAFOperationGroup* pOpGroup) {
-    AudioParams params;
-    
-    // Получаем название операции
-    IAAFOperationDef* pOpDef = nullptr;
-    if (SUCCEEDED(pOpGroup->GetOperationDefinition(&pOpDef))) {
-        IAAFDefObject* pDefObj = nullptr;
-        if (SUCCEEDED(pOpDef->QueryInterface(IID_IAAFDefObject, (void**)&pDefObj))) {
-            aafWChar opNameBuf[256] = {0};
-            if (SUCCEEDED(pDefObj->GetName(opNameBuf, sizeof(opNameBuf)))) {
-                params.effectName = wideToUtf8(opNameBuf);
-            }
-            pDefObj->Release();
-        }
-        pOpDef->Release();
-    }
-    
-    // Получаем параметры операции через enumerator
-    aafUInt32 numParams = 0;
-    if (SUCCEEDED(pOpGroup->CountParameters(&numParams)) && numParams > 0) {
-        IEnumAAFParameters* pParamEnum = nullptr;
-        if (SUCCEEDED(pOpGroup->GetParameters(&pParamEnum))) {
-            IAAFParameter* pParam = nullptr;
-            
-            while (SUCCEEDED(pParamEnum->NextOne(&pParam))) {
-                // Получаем определение параметра
-                IAAFParameterDef* pParamDef = nullptr;
-                if (SUCCEEDED(pParam->GetParameterDefinition(&pParamDef))) {
-                    IAAFDefObject* pParamDefObj = nullptr;
-                    if (SUCCEEDED(pParamDef->QueryInterface(IID_IAAFDefObject, (void**)&pParamDefObj))) {
-                        aafWChar paramNameBuf[256] = {0};
-                        if (SUCCEEDED(pParamDefObj->GetName(paramNameBuf, sizeof(paramNameBuf)))) {
-                            std::string paramName = wideToUtf8(paramNameBuf);
-                            
-                            // Получаем значение параметра
-                            IAAFConstantValue* pConstValue = nullptr;
-                            if (SUCCEEDED(pParam->QueryInterface(IID_IAAFConstantValue, (void**)&pConstValue))) {
-                                aafUInt32 valueSize = 0;
-                                if (SUCCEEDED(pConstValue->GetValueBufLen(&valueSize)) && valueSize > 0) {
-                                    aafUInt8* valueBuffer = new aafUInt8[valueSize];
-                                    if (SUCCEEDED(pConstValue->GetValue(valueSize, valueBuffer, &valueSize))) {
-                                        
-                                        // Интерпретируем значение в зависимости от типа параметра
-                                        if (paramName.find("Gain") != std::string::npos || 
-                                            paramName.find("Level") != std::string::npos) {
-                                            if (valueSize >= sizeof(float)) {
-                                                params.hasGain = true;
-                                                params.gainValue = *((float*)valueBuffer);
-                                            } else if (valueSize >= sizeof(double)) {
-                                                params.hasGain = true;
-                                                params.gainValue = *((double*)valueBuffer);
-                                            }
-                                        } else if (paramName.find("Pan") != std::string::npos) {
-                                            if (valueSize >= sizeof(float)) {
-                                                params.hasPan = true;
-                                                params.panValue = *((float*)valueBuffer);
-                                            } else if (valueSize >= sizeof(double)) {
-                                                params.hasPan = true;
-                                                params.panValue = *((double*)valueBuffer);
-                                            }
-                                        } else if (paramName.find("Volume") != std::string::npos) {
-                                            if (valueSize >= sizeof(float)) {
-                                                params.hasVolume = true;
-                                                params.volumeValue = *((float*)valueBuffer);
-                                            } else if (valueSize >= sizeof(double)) {
-                                                params.hasVolume = true;
-                                                params.volumeValue = *((double*)valueBuffer);
-                                            }
-                                        }
-                                    }
-                                    delete[] valueBuffer;
-                                }
-                                pConstValue->Release();
-                            }
-                        }
-                        pParamDefObj->Release();
-                    }
-                    pParamDef->Release();
-                }
-                pParam->Release();
-            }
-            pParamEnum->Release();
-        }
-    }
-    
-    return params;
-}
-
-// Функция для обработки слота в деталях
-void processSlotInDetail(IAAFMobSlot* pSlot, std::ofstream& out, int slotIndex, 
-                        const std::map<std::string, std::string>& mobIdToName) {
-    
-    aafSlotID_t slotID = 0;
-    pSlot->GetSlotID(&slotID);
-    
-    aafWChar slotName[256] = {0};
-    pSlot->GetName(slotName, sizeof(slotName));
-    std::string slotNameStr = wideToUtf8(slotName);
-    
-    // Определяем тип слота и editRate
-    aafRational_t editRate = {25, 1}; // default
-    std::string slotType = "MobSlot";
-    
-    IAAFTimelineMobSlot* pTimelineSlot = nullptr;
-    if (SUCCEEDED(pSlot->QueryInterface(IID_IAAFTimelineMobSlot, (void**)&pTimelineSlot))) {
-        slotType = "TimelineSlot";
-        pTimelineSlot->GetEditRate(&editRate);
-        
-        aafPosition_t origin = 0;
-        pTimelineSlot->GetOrigin(&origin);
-        
-        out << "  - Track #" << slotIndex << " [" << slotType << "] ID=" << slotID;
-        if (!slotNameStr.empty()) {
-            out << ", Name='" << slotNameStr << "'";
-        }
-        out << ", EditRate=" << editRate.numerator << "/" << editRate.denominator;
-        out << ", Origin=" << origin << std::endl;
-        
-        pTimelineSlot->Release();
-    }
-    
-    // Получаем сегмент
-    IAAFSegment* pSegment = nullptr;
-    if (SUCCEEDED(pSlot->GetSegment(&pSegment))) {
-        
-        IAAFSequence* pSeq = nullptr;
-        IAAFSourceClip* pSourceClip = nullptr;
-        
-        if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFSequence, (void**)&pSeq))) {
-            out << "    Sequence with components:" << std::endl;
-            
-            IEnumAAFComponents* pEnum = nullptr;
-            if (SUCCEEDED(pSeq->GetComponents(&pEnum))) {
-                IAAFComponent* pComp = nullptr;
-                int compIndex = 0;
-                
-                while (SUCCEEDED(pEnum->NextOne(&pComp))) {
-                    processComponent(pComp, out, compIndex++, mobIdToName, editRate);
-                    pComp->Release();
-                }
-                pEnum->Release();
-            }
-            pSeq->Release();
-            
-        } else if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFSourceClip, (void**)&pSourceClip))) {
-            out << "    Single SourceClip:" << std::endl;
-            
-            IAAFComponent* pComp = nullptr;
-            if (SUCCEEDED(pSourceClip->QueryInterface(IID_IAAFComponent, (void**)&pComp))) {
-                processComponent(pComp, out, 0, mobIdToName, editRate);
-                pComp->Release();
-            }
-            pSourceClip->Release();
-            
-        } else {
-            out << "    Unknown segment type" << std::endl;
-        }
-        
-        pSegment->Release();
-    }
-}
-void processAudioComponentWithPosition(IAAFComponent* pComp, std::ofstream& out, int compIndex, 
-                                      aafPosition_t startPosition, 
-                                      const std::map<std::string, std::string>& mobIdToName, 
-                                      const aafRational_t& editRate,
-                                      int& audioClipCount, int& audioFadeCount, int& audioEffectCount) {
-    
-    aafLength_t length = 0;
-    pComp->GetLength(&length);
-    
-    // Конвертируем в секунды
-    double startSec = (double)startPosition * editRate.denominator / editRate.numerator;
-    double lengthSec = (double)length * editRate.denominator / editRate.numerator;
-    double endSec = startSec + lengthSec;
-    
-    // Проверяем тип аудио компонента
-    IAAFSourceClip* pClip = nullptr;
-    IAAFFiller* pFiller = nullptr;
-    IAAFTransition* pTransition = nullptr;
-    IAAFOperationGroup* pOpGroup = nullptr;
-    
-    if (SUCCEEDED(pComp->QueryInterface(IID_IAAFSourceClip, (void**)&pClip))) {
-        // Аудио клип
-        audioClipCount++;
-        
-        aafSourceRef_t ref;
-        if (SUCCEEDED(pClip->GetSourceReference(&ref))) {
-            double sourceStartSec = (double)ref.startTime * editRate.denominator / editRate.numerator;
-            
-            std::string refID = formatMobID(ref.sourceID);
-            std::string fileName = "(unknown)";
-            if (mobIdToName.count(refID)) {
-                fileName = mobIdToName.at(refID);
-            }
-            
-            out << "      📻 #" << compIndex << " AUDIO_CLIP "
-                << "Timeline: " << std::fixed << std::setprecision(3) 
-                << startSec << "s -> " << endSec << "s (" << lengthSec << "s) | "
-                << "Source: " << ref.startTime << " (" << sourceStartSec << "s) | "
-                << "File: " << fileName << std::endl;
-        }
-        pClip->Release();
-        
-    } else if (SUCCEEDED(pComp->QueryInterface(IID_IAAFFiller, (void**)&pFiller))) {
-        // Аудио переходы/тишина
-        audioFadeCount++;
-        
-        out << "      🔇 #" << compIndex << " AUDIO_FADE/SILENCE "
-            << "Timeline: " << std::fixed << std::setprecision(3) 
-            << startSec << "s -> " << endSec << "s (" << lengthSec << "s)" << std::endl;
-        pFiller->Release();
-        
-    } else if (SUCCEEDED(pComp->QueryInterface(IID_IAAFTransition, (void**)&pTransition))) {
-        // Аудио переходы (CrossFade)
-        audioFadeCount++;
-        
-        aafPosition_t cutPoint = 0;
-        pTransition->GetCutPoint(&cutPoint);
-        double cutPointSec = (double)cutPoint * editRate.denominator / editRate.numerator;
-        
-        out << "      🎚️ #" << compIndex << " AUDIO_CROSSFADE "
-            << "Timeline: " << std::fixed << std::setprecision(3) 
-            << startSec << "s -> " << endSec << "s (" << lengthSec << "s) | "
-            << "CutPoint: " << cutPoint << " (" << cutPointSec << "s)" << std::endl;
-        pTransition->Release();
-        
-    } else if (SUCCEEDED(pComp->QueryInterface(IID_IAAFOperationGroup, (void**)&pOpGroup))) {
-        // Аудио обработка (игнорируем базовые операции)
-        IAAFOperationDef* pOpDef = nullptr;
-        std::string opName = "Unknown";
-        if (SUCCEEDED(pOpGroup->GetOperationDefinition(&pOpDef))) {
-            IAAFDefObject* pDefObj = nullptr;
-            if (SUCCEEDED(pOpDef->QueryInterface(IID_IAAFDefObject, (void**)&pDefObj))) {
-                aafWChar opNameBuf[256] = {0};
-                if (SUCCEEDED(pDefObj->GetName(opNameBuf, sizeof(opNameBuf)))) {
-                    opName = wideToUtf8(opNameBuf);
-                }
-                pDefObj->Release();
-            }
-            pOpDef->Release();
-        }
-        
-        // Пропускаем базовые аудио операции
-        if (opName == "Mono Audio Gain" || opName == "Audio Gain" || opName == "Volume") {
-            // Не показываем базовые операции, обрабатываем входные сегменты
-            aafUInt32 numInputs = 0;
-            if (SUCCEEDED(pOpGroup->CountSourceSegments(&numInputs)) && numInputs > 0) {
-                for (aafUInt32 inputIndex = 0; inputIndex < numInputs; inputIndex++) {
-                    IAAFSegment* pInputSegment = nullptr;
-                    if (SUCCEEDED(pOpGroup->GetInputSegmentAt(inputIndex, &pInputSegment))) {
-                        IAAFComponent* pInputComp = nullptr;
-                        if (SUCCEEDED(pInputSegment->QueryInterface(IID_IAAFComponent, (void**)&pInputComp))) {
-                            // Рекурсивно обрабатываем входной компонент
-                            processAudioComponentWithPosition(pInputComp, out, compIndex, startPosition, 
-                                                             mobIdToName, editRate, audioClipCount, audioFadeCount, audioEffectCount);
-                            pInputComp->Release();
-                        }
-                        pInputSegment->Release();
-                    }
-                }
-            }
-        } else {
-            // Показываем только значимые аудио эффекты
-            audioEffectCount++;
-            
-            aafUInt32 numInputs = 0;
-            pOpGroup->CountSourceSegments(&numInputs);
-            
-            out << "      🎛️ #" << compIndex << " AUDIO_EFFECT "
-                << "Timeline: " << std::fixed << std::setprecision(3) 
-                << startSec << "s -> " << endSec << "s (" << lengthSec << "s) | "
-                << "Effect: " << opName << " | Inputs: " << numInputs << std::endl;
-        }
-        
-        pOpGroup->Release();
-        
-    } else {
-        // Неизвестный аудио компонент
-        out << "      ❓ #" << compIndex << " UNKNOWN_AUDIO "
-            << "Timeline: " << std::fixed << std::setprecision(3) 
-            << startSec << "s -> " << endSec << "s (" << lengthSec << "s)" << std::endl;
-    }
-}
-
 // Функция для получения начального timecode композиции
 aafPosition_t getCompositionStartTimecode(IAAFMob* pCompMob) {
     aafPosition_t startTC = 0;
@@ -1088,7 +803,215 @@ std::string findAndExtractEssenceData(IAAFHeader* pHeader, const aafMobID_t& sou
     return extractedFileName;
 }
 
-// Заглушки для функций, которые будут реализованы позже
+// Функция для обработки аудио компонента с позицией
+void processAudioComponentWithPosition(IAAFComponent* pComp, std::ofstream& out, int compIndex, 
+                                      aafPosition_t startPosition, 
+                                      const std::map<std::string, std::string>& mobIdToName, 
+                                      const aafRational_t& editRate,
+                                      int& audioClipCount, int& audioFadeCount, int& audioEffectCount) {
+    
+    if (!pComp) return;
+    
+    // Получаем длительность компонента
+    aafLength_t length = 0;
+    pComp->GetLength(&length);
+    
+    // Получаем тип данных
+    IAAFDataDef* pDataDef = nullptr;
+    std::string dataType = "Unknown";
+    if (SUCCEEDED(pComp->GetDataDef(&pDataDef))) {
+        dataType = getDataDefName(pDataDef);
+        pDataDef->Release();
+    }
+    
+    // Конвертируем в секунды
+    double startSec = (double)startPosition * editRate.denominator / editRate.numerator;
+    double lengthSec = (double)length * editRate.denominator / editRate.numerator;
+    double endSec = startSec + lengthSec;
+    
+    // Проверяем тип компонента
+    IAAFSourceClip* pClip = nullptr;
+    IAAFFiller* pFiller = nullptr;
+    IAAFTransition* pTransition = nullptr;
+    IAAFOperationGroup* pOpGroup = nullptr;
+    
+    if (SUCCEEDED(pComp->QueryInterface(IID_IAAFSourceClip, (void**)&pClip))) {
+        // SourceClip - аудиоклип
+        audioClipCount++;
+        
+        aafSourceRef_t ref;
+        if (SUCCEEDED(pClip->GetSourceReference(&ref))) {
+            double sourceStartSec = (double)ref.startTime * editRate.denominator / editRate.numerator;
+            
+            std::string refID = formatMobID(ref.sourceID);
+            std::string fileName = "(unknown)";
+            
+            if (mobIdToName.count(refID)) {
+                fileName = mobIdToName.at(refID);
+            }
+            
+            out << "      #" << compIndex << " AUDIO_CLIP [" << dataType << "] "
+                << "Timeline: " << std::fixed << std::setprecision(3) 
+                << startSec << "s -> " << endSec << "s (" << lengthSec << "s) | "
+                << "Source: " << ref.startTime << " (" << sourceStartSec << "s) | "
+                << "SlotID: " << ref.sourceSlotID << " | "
+                << "File: " << fileName << std::endl;
+        }
+        pClip->Release();
+        
+    } else if (SUCCEEDED(pComp->QueryInterface(IID_IAAFFiller, (void**)&pFiller))) {
+        // Filler - пустое место в аудиотреке
+        out << "      #" << compIndex << " AUDIO_FILLER [" << dataType << "] "
+            << "Timeline: " << std::fixed << std::setprecision(3) 
+            << startSec << "s -> " << endSec << "s (" << lengthSec << "s)" << std::endl;
+        pFiller->Release();
+        
+    } else if (SUCCEEDED(pComp->QueryInterface(IID_IAAFTransition, (void**)&pTransition))) {
+        // Transition - crossfade между аудиоклипами
+        audioFadeCount++;
+        
+        aafPosition_t cutPoint = 0;
+        pTransition->GetCutPoint(&cutPoint);
+        double cutPointSec = (double)cutPoint * editRate.denominator / editRate.numerator;
+        
+        out << "      #" << compIndex << " AUDIO_CROSSFADE [" << dataType << "] "
+            << "Timeline: " << std::fixed << std::setprecision(3) 
+            << startSec << "s -> " << endSec << "s (" << lengthSec << "s) | "
+            << "CutPoint: " << cutPoint << " (" << cutPointSec << "s)" << std::endl;
+        pTransition->Release();
+        
+    } else if (SUCCEEDED(pComp->QueryInterface(IID_IAAFOperationGroup, (void**)&pOpGroup))) {
+        // OperationGroup - аудиоэффект
+        audioEffectCount++;
+        
+        IAAFOperationDef* pOpDef = nullptr;
+        std::string opName = "Unknown";
+        if (SUCCEEDED(pOpGroup->GetOperationDefinition(&pOpDef))) {
+            IAAFDefObject* pDefObj = nullptr;
+            if (SUCCEEDED(pOpDef->QueryInterface(IID_IAAFDefObject, (void**)&pDefObj))) {
+                aafWChar opNameBuf[256] = {0};
+                if (SUCCEEDED(pDefObj->GetName(opNameBuf, sizeof(opNameBuf)))) {
+                    opName = wideToUtf8(opNameBuf);
+                }
+                pDefObj->Release();
+            }
+            pOpDef->Release();
+        }
+        
+        out << "      #" << compIndex << " AUDIO_EFFECT [" << dataType << "] "
+            << "Timeline: " << std::fixed << std::setprecision(3) 
+            << startSec << "s -> " << endSec << "s (" << lengthSec << "s) | "
+            << "Operation: " << opName << std::endl;
+        pOpGroup->Release();
+        
+    } else {
+        // Неизвестный тип компонента
+        out << "      #" << compIndex << " UNKNOWN_AUDIO [" << dataType << "] "
+            << "Timeline: " << std::fixed << std::setprecision(3) 
+            << startSec << "s -> " << endSec << "s (" << lengthSec << "s)" << std::endl;
+    }
+}
+
+// Функция для извлечения клипов из сегмента для CSV экспорта
+void extractClipsFromSegment(IAAFSegment* pSegment, const std::map<std::string, std::string>& mobIdToName,
+                           const aafRational_t& editRate, aafPosition_t sessionStartTC,
+                           aafPosition_t currentPosition, AudioTrackData& trackData,
+                           IAAFHeader* pHeader, std::ofstream& out) {
+    
+    if (!pSegment) return;
+    
+    // Проверяем тип сегмента
+    IAAFSequence* pSeq = nullptr;
+    IAAFSourceClip* pSourceClip = nullptr;
+    IAAFComponent* pComp = nullptr;
+    
+    if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFSequence, (void**)&pSeq))) {
+        // Последовательность компонентов
+        IEnumAAFComponents* pEnum = nullptr;
+        if (SUCCEEDED(pSeq->GetComponents(&pEnum))) {
+            IAAFComponent* pSeqComp = nullptr;
+            aafPosition_t seqPosition = currentPosition;
+            
+            while (SUCCEEDED(pEnum->NextOne(&pSeqComp))) {
+                aafLength_t compLength = 0;
+                pSeqComp->GetLength(&compLength);
+                
+                // Рекурсивно обрабатываем каждый компонент
+                IAAFSegment* pCompSegment = nullptr;
+                if (SUCCEEDED(pSeqComp->QueryInterface(IID_IAAFSegment, (void**)&pCompSegment))) {
+                    extractClipsFromSegment(pCompSegment, mobIdToName, editRate, sessionStartTC, 
+                                          seqPosition, trackData, pHeader, out);
+                    pCompSegment->Release();
+                }
+                
+                seqPosition += compLength;
+                pSeqComp->Release();
+            }
+            pEnum->Release();
+        }
+        pSeq->Release();
+        
+    } else if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFSourceClip, (void**)&pSourceClip))) {
+        // Отдельный клип
+        aafSourceRef_t ref;
+        if (SUCCEEDED(pSourceClip->GetSourceReference(&ref))) {
+            
+            aafLength_t clipLength = 0;
+            if (SUCCEEDED(pSourceClip->QueryInterface(IID_IAAFComponent, (void**)&pComp))) {
+                pComp->GetLength(&clipLength);
+                pComp->Release();
+            }
+            
+            // Создаем данные клипа для CSV
+            AudioClipData clipData;
+            clipData.mobID = formatMobID(ref.sourceID);
+            
+            // Получаем имя файла
+            if (mobIdToName.count(clipData.mobID)) {
+                clipData.fileName = mobIdToName.at(clipData.mobID);
+            } else {
+                clipData.fileName = "(unknown)";
+                
+                // Пытаемся найти embedded медиа
+                std::string extractedFile = findAndExtractEssenceData(pHeader, ref.sourceID, clipData.mobID, out);
+                if (!extractedFile.empty()) {
+                    clipData.fileName = extractedFile;
+                }
+            }
+            
+            // Конвертируем времена в секунды
+            clipData.timelineStart = (double)currentPosition * editRate.denominator / editRate.numerator;
+            clipData.length = (double)clipLength * editRate.denominator / editRate.numerator;
+            clipData.timelineEnd = clipData.timelineStart + clipData.length;
+            clipData.sourceStart = (double)ref.startTime * editRate.denominator / editRate.numerator;
+            
+            // Добавляем клип в трек
+            trackData.clips.push_back(clipData);
+        }
+        pSourceClip->Release();
+        
+    } else if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFComponent, (void**)&pComp))) {
+        // Другие типы компонентов (Filler, Transition, etc.)
+        aafLength_t compLength = 0;
+        pComp->GetLength(&compLength);
+        
+        // Для пустых сегментов тоже можем создать запись
+        IAAFFiller* pFiller = nullptr;
+        if (SUCCEEDED(pComp->QueryInterface(IID_IAAFFiller, (void**)&pFiller))) {
+            AudioClipData clipData;
+            clipData.fileName = "(silence)";
+            clipData.timelineStart = (double)currentPosition * editRate.denominator / editRate.numerator;
+            clipData.length = (double)compLength * editRate.denominator / editRate.numerator;
+            clipData.timelineEnd = clipData.timelineStart + clipData.length;
+            
+            trackData.clips.push_back(clipData);
+            pFiller->Release();
+        }
+        
+        pComp->Release();
+    }
+}
+
 bool isAudioTrack(IAAFMobSlot* pSlot) {
     if (!pSlot) return false;
     
@@ -1147,143 +1070,86 @@ void processAudioTrackForExportWithHeader(IAAFMobSlot* pSlot, const std::map<std
     pSegment->Release();
 }
 
-
-// Функция для извлечения клипов из сегмента
-void extractClipsFromSegment(IAAFSegment* pSegment, const std::map<std::string, std::string>& mobIdToName,
-                           const aafRational_t& editRate, aafPosition_t sessionStartTC, 
-                           aafPosition_t currentPosition, AudioTrackData& trackData, 
-                           IAAFHeader* pHeader, std::ofstream& out) {
-    if (!pSegment) return;
+// Функция для поиска и копирования аудиофайлов
+void processAudioFiles(const ProjectData& projectData, std::ofstream& out) {
+    out << "\n🎵 === PROCESSING AUDIO FILES ===" << std::endl;
     
-    // Проверяем тип сегмента
-    IAAFSequence* pSeq = nullptr;
-    IAAFSourceClip* pSourceClip = nullptr;
-    IAAFOperationGroup* pOpGroup = nullptr;
+    // Создаем папку для всех аудиофайлов
+    try {
+        std::filesystem::create_directories("audio_files");
+        out << "[*] Created audio_files folder for all project audio" << std::endl;
+    } catch (const std::exception& e) {
+        out << "ERROR: Failed to create audio_files folder: " << e.what() << std::endl;
+        return;
+    }
     
-    if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFSequence, (void**)&pSeq))) {
-        // Последовательность - обрабатываем все компоненты
-        IEnumAAFComponents* pEnum = nullptr;
-        if (SUCCEEDED(pSeq->GetComponents(&pEnum))) {
-            IAAFComponent* pComp = nullptr;
-            aafPosition_t position = currentPosition;
-            
-            while (SUCCEEDED(pEnum->NextOne(&pComp))) {
-                aafLength_t length = 0;
-                pComp->GetLength(&length);
-                
-                extractClipFromComponent(pComp, mobIdToName, editRate, sessionStartTC, 
-                                       position, trackData, pHeader, out);
-                
-                position += length;
-                pComp->Release();
+    // Собираем уникальные имена файлов
+    std::set<std::string> uniqueFiles;
+    for (const auto& track : projectData.tracks) {
+        for (const auto& clip : track.clips) {
+            if (!clip.fileName.empty() && clip.fileName != "(unknown)") {
+                uniqueFiles.insert(clip.fileName);
             }
-            pEnum->Release();
         }
-        pSeq->Release();
+    }
+    
+    out << "[*] Found " << uniqueFiles.size() << " unique audio files to process:" << std::endl;
+    
+    int copiedFiles = 0;
+    int embeddedFiles = 0;
+    int missingFiles = 0;
+    
+    // Возможные папки с исходными файлами
+    std::vector<std::string> sourcePaths = {
+        "J:\\Nuendo PROJECTS SSD\\Other\\DP\\Bezhanov\\BEZHANOV\\test\\Audio",
+        ".",  // текущая папка
+        "Audio",  // локальная папка Audio
+        "media",  // локальная папка media
+        "extracted_media"  // папка с extracted файлами
+    };
+    
+    for (const auto& fileName : uniqueFiles) {
+        bool found = false;
         
-    } else if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFSourceClip, (void**)&pSourceClip))) {
-        // Одиночный клип
-        IAAFComponent* pComp = nullptr;
-        if (SUCCEEDED(pSourceClip->QueryInterface(IID_IAAFComponent, (void**)&pComp))) {
-            extractClipFromComponent(pComp, mobIdToName, editRate, sessionStartTC, 
-                                   currentPosition, trackData, pHeader, out);
-            pComp->Release();
-        }
-        pSourceClip->Release();
-        
-    } else if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFOperationGroup, (void**)&pOpGroup))) {
-        // Операция - обрабатываем входные сегменты
-        aafUInt32 numInputs = 0;
-        if (SUCCEEDED(pOpGroup->CountSourceSegments(&numInputs))) {
-            for (aafUInt32 i = 0; i < numInputs; i++) {
-                IAAFSegment* pInputSegment = nullptr;
-                if (SUCCEEDED(pOpGroup->GetInputSegmentAt(i, &pInputSegment))) {
-                    extractClipsFromSegment(pInputSegment, mobIdToName, editRate, 
-                                          sessionStartTC, currentPosition, trackData, pHeader, out);
-                    pInputSegment->Release();
+        // Ищем файл в возможных путях
+        for (const auto& sourcePath : sourcePaths) {
+            std::string fullPath = sourcePath + "\\" + fileName;
+            
+            try {
+                if (std::filesystem::exists(fullPath)) {
+                    // Копируем файл
+                    std::string destPath = "audio_files\\" + fileName;
+                    std::filesystem::copy_file(fullPath, destPath, 
+                                             std::filesystem::copy_options::overwrite_existing);
+                    
+                    out << "  ✅ Copied: " << fileName << " from " << sourcePath << std::endl;
+                    copiedFiles++;
+                    found = true;
+                    break;
                 }
+            } catch (const std::exception& e) {
+                // Игнорируем ошибки доступа к папкам
+                continue;
             }
         }
-        pOpGroup->Release();
-    }
-}
-
-// Функция для извлечения клипа из компонента
-void extractClipFromComponent(IAAFComponent* pComp, const std::map<std::string, std::string>& mobIdToName,
-                            const aafRational_t& editRate, aafPosition_t sessionStartTC,
-                            aafPosition_t position, AudioTrackData& trackData,
-                            IAAFHeader* pHeader, std::ofstream& out) {
-    if (!pComp) return;
-    
-    // Проверяем, что это аудио компонент
-    IAAFDataDef* pDataDef = nullptr;
-    if (SUCCEEDED(pComp->GetDataDef(&pDataDef))) {
-        std::string dataType = getDataDefName(pDataDef);
-        pDataDef->Release();
         
-        if (dataType != "Sound") {
-            return; // Не аудио
-        }
-    }
-    
-    // Получаем длину
-    aafLength_t length = 0;
-    pComp->GetLength(&length);
-    
-    // Конвертируем позиции в секунды
-    double timelineStart = (double)position * editRate.denominator / editRate.numerator;
-    double lengthSec = (double)length * editRate.denominator / editRate.numerator;
-    double timelineEnd = timelineStart + lengthSec;
-    
-    // Проверяем тип компонента
-    IAAFSourceClip* pClip = nullptr;
-    IAAFOperationGroup* pOpGroup = nullptr;
-    
-    if (SUCCEEDED(pComp->QueryInterface(IID_IAAFSourceClip, (void**)&pClip))) {
-        // Аудиоклип
-        aafSourceRef_t ref;
-        if (SUCCEEDED(pClip->GetSourceReference(&ref))) {
-            AudioClipData clipData;
-            
-            // Заполняем данные клипа
-            std::string refID = formatMobID(ref.sourceID);
-            clipData.mobID = refID;
-            
-            if (mobIdToName.count(refID)) {
-                clipData.fileName = mobIdToName.at(refID);
+        if (!found) {
+            // Файл не найден - возможно, это embedded медиа
+            if (fileName.find("embedded") != std::string::npos) {
+                out << "  🔗 Embedded: " << fileName << " (already extracted)" << std::endl;
+                embeddedFiles++;
             } else {
-                clipData.fileName = "(unknown)";
-            }
-            
-            clipData.timelineStart = timelineStart;
-            clipData.timelineEnd = timelineEnd;
-            clipData.length = lengthSec;
-            clipData.sourceStart = (double)ref.startTime * editRate.denominator / editRate.numerator;
-            
-            // Значения по умолчанию
-            clipData.gain = 0.0;
-            clipData.volume = 1.0;
-            clipData.pan = 0.0;
-            
-            trackData.clips.push_back(clipData);
-        }
-        pClip->Release();
-        
-    } else if (SUCCEEDED(pComp->QueryInterface(IID_IAAFOperationGroup, (void**)&pOpGroup))) {
-        // Операция - обрабатываем входные сегменты
-        aafUInt32 numInputs = 0;
-        if (SUCCEEDED(pOpGroup->CountSourceSegments(&numInputs))) {
-            for (aafUInt32 i = 0; i < numInputs; i++) {
-                IAAFSegment* pInputSegment = nullptr;
-                if (SUCCEEDED(pOpGroup->GetInputSegmentAt(i, &pInputSegment))) {
-                    extractClipsFromSegment(pInputSegment, mobIdToName, editRate, 
-                                          sessionStartTC, position, trackData, pHeader, out);
-                    pInputSegment->Release();
-                }
+                out << "  ❌ Missing: " << fileName << std::endl;
+                missingFiles++;
             }
         }
-        pOpGroup->Release();
     }
+    
+    out << "\n📊 Audio Files Summary:" << std::endl;
+    out << "  Copied external files: " << copiedFiles << std::endl;
+    out << "  Embedded files: " << embeddedFiles << std::endl;
+    out << "  Missing files: " << missingFiles << std::endl;
+    out << "  Total unique files: " << uniqueFiles.size() << std::endl;
 }
 
 void exportToCSV(const ProjectData& projectData, const std::string& filename) {
@@ -1495,6 +1361,9 @@ int main(int argc, char* argv[]) {
     
     // Экспортируем в CSV (единственный формат экспорта)
     exportToCSV(projectData, "aaf_export.csv");
+    
+    // Обрабатываем аудиофайлы (копируем/извлекаем)
+    processAudioFiles(projectData, out);
     
     // Статистика аудио треков
     out << "\n📊 === AUDIO TRACKS SUMMARY ===" << std::endl;

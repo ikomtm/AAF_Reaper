@@ -10,7 +10,25 @@ set(AAFSDK_ROOT "C:/Users/KSN_PC/C++Projects/AAF_Reaper/AAF_SDK_devel")
 include_directories("${AAFSDK_ROOT}/include")
 link_directories("C:/Users/KSN_PC/C++Projects/AAF_Reaper/AAF_SDK_devel/x64/Release/RefImpl")
 
-add_executable(aaf_reader main.cpp)
+# Исходные файлы нового модульного проекта
+set(SOURCES
+    main_new.cpp
+    aaf_utils.cpp
+    aaf_parser.cpp
+    media_utils.cpp
+    csv_export.cpp
+)
+
+# Заголовочные файлы
+set(HEADERS
+    data_structures.h
+    aaf_utils.h
+    aaf_parser.h
+    media_utils.h
+    csv_export.h
+)
+
+add_executable(aaf_reader ${SOURCES} ${HEADERS})
 
 
 
