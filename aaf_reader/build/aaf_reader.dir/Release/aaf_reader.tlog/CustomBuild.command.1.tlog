@@ -1,0 +1,10 @@
+^C:\USERS\KSN_PC\C++PROJECTS\AAF_REAPER\AAF_READER\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/KSN_PC/C++Projects/AAF_Reaper/aaf_reader -BC:/Users/KSN_PC/C++Projects/AAF_Reaper/aaf_reader/build --check-stamp-file C:/Users/KSN_PC/C++Projects/AAF_Reaper/aaf_reader/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

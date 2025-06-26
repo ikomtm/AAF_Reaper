@@ -1,0 +1,10 @@
+^C:\USERS\KSN_PC\C++PROJECTS\AAF_REAPER\AAF_READER\BUILD\CMAKEFILES\834710F402ACAF7F80223D29CF25E809\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/KSN_PC/C++Projects/AAF_Reaper/aaf_reader -BC:/Users/KSN_PC/C++Projects/AAF_Reaper/aaf_reader/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/KSN_PC/C++Projects/AAF_Reaper/aaf_reader/build/aaf_reader.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

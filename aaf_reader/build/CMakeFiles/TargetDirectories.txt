@@ -1,0 +1,3 @@
+C:/Users/KSN_PC/C++Projects/AAF_Reaper/aaf_reader/build/CMakeFiles/aaf_reader.dir
+C:/Users/KSN_PC/C++Projects/AAF_Reaper/aaf_reader/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/KSN_PC/C++Projects/AAF_Reaper/aaf_reader/build/CMakeFiles/ZERO_CHECK.dir
