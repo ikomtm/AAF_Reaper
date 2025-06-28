@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <AAFTypes.h>
 
 // Простые структуры для экспорта в CSV
 struct AudioClipData {
@@ -58,4 +59,47 @@ struct ProjectData {
     ProjectData() : projectName("AAF_Import_Project"), sampleRate(48000.0), 
                    channelCount(2), sessionStartTimecode(0.0), 
                    timecodeFormat("25fps"), totalLength(0.0) {}
+};
+
+// Структура для хранения информации об аудио клипе
+struct AAFAudioClipInfo {
+    std::string originalFileName;    // Имя исходного файла
+    std::string extractedFilePath;   // Путь к извлеченному файлу
+    std::string mobID;              // MobID клипа
+    aafPosition_t timelineStart;    // Начало на таймлайне
+    aafPosition_t timelineEnd;      // Конец на таймлайне
+    aafPosition_t sourceStart;      // Начало в исходном файле
+    aafLength_t duration;           // Длительность
+    
+    // Аудио свойства
+    aafRational_t sampleRate;
+    aafUInt32 channelCount;
+    aafUInt32 bitsPerSample;
+    std::string compressionType;
+    
+    // Тип источника и статус embedded
+    std::string sourceType;         // "Embedded", "External", "Unknown"
+    bool isEmbedded;               // true если клип embedded
+    
+    // Эффекты и фейды
+    std::vector<std::string> effects;
+    bool hasFadeIn;
+    bool hasFadeOut;
+    aafLength_t fadeInLength;
+    aafLength_t fadeOutLength;
+};
+
+// Структура для хранения информации об аудио треке
+struct AAFAudioTrackInfo {
+    aafSlotID_t slotID;
+    std::string trackName;
+    aafRational_t editRate;
+    aafPosition_t origin;
+    std::vector<AAFAudioClipInfo> clips;
+    
+    // Трек свойства
+    double volume;
+    double pan;
+    bool mute;
+    bool solo;
 };

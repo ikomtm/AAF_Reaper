@@ -15,6 +15,9 @@ set(SOURCES
     main_new.cpp
     aaf_utils.cpp
     aaf_proper_parser.cpp
+    aaf_clip_processor.cpp
+    aaf_audio_properties.cpp
+    aaf_essence_extractor.cpp
     media_utils.cpp
     csv_export.cpp
     debug_logger.cpp
@@ -25,6 +28,9 @@ set(HEADERS
     data_structures.h
     aaf_utils.h
     aaf_proper_parser.h
+    aaf_clip_processor.h
+    aaf_audio_properties.h
+    aaf_essence_extractor.h
     media_utils.h
     csv_export.h
     debug_logger.h

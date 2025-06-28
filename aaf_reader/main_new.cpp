@@ -75,7 +75,7 @@ int main(int argc, char* argv[]) {
     int audioEffectCount = 0;
 
     // Создаем папки для медиафайлов
-    createExtractedMediaFolder();
+    MediaUtils::createExtractedMediaFolder();
 
     std::ofstream out("output.txt");
     out << "[*] Opening AAF file..." << std::endl;

@@ -1,6 +1,9 @@
 C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\main_new.cpp;C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\build\aaf_reader.dir\Release\main_new.obj
 C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_utils.cpp;C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\build\aaf_reader.dir\Release\aaf_utils.obj
 C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_proper_parser.cpp;C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\build\aaf_reader.dir\Release\aaf_proper_parser.obj
+C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_clip_processor.cpp;C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\build\aaf_reader.dir\Release\aaf_clip_processor.obj
+C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_audio_properties.cpp;C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\build\aaf_reader.dir\Release\aaf_audio_properties.obj
+C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_essence_extractor.cpp;C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\build\aaf_reader.dir\Release\aaf_essence_extractor.obj
 C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\media_utils.cpp;C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\build\aaf_reader.dir\Release\media_utils.obj
 C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\csv_export.cpp;C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\build\aaf_reader.dir\Release\csv_export.obj
 C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\debug_logger.cpp;C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\build\aaf_reader.dir\Release\debug_logger.obj

@@ -10,6 +10,15 @@
     <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_proper_parser.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_clip_processor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_audio_properties.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_essence_extractor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\media_utils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -28,6 +37,15 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_proper_parser.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_clip_processor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_audio_properties.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_essence_extractor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\media_utils.h">
