@@ -145,36 +145,57 @@ bool AAFEssenceExtractor::extractAllEmbeddedAudio(const std::vector<AAFAudioTrac
 }
 
 bool AAFEssenceExtractor::parseMobIDString(const std::string& mobIdStr, aafMobID_t& mobID) {
-    if (mobIdStr.length() < 36) return false; // Минимальная длина UUID
-    
-    // Парсим строку формата: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-    // В aafMobID_t material это aafUID_t
+    if (mobIdStr.length() < 36)
+        return false; // Минимальная длина UUID
+
+    // Сначала пытаемся найти Mob с совпадающей строкой ID
+    aafSearchCrit_t crit;
+    crit.searchTag = kAAFByMobKind;
+    crit.tags.mobKind = kAAFAllMob;
+
+    IEnumAAFMobs* pEnum = nullptr;
+    if (SUCCEEDED(m_pHeader->GetMobs(&crit, &pEnum))) {
+        IAAFMob* pMob = nullptr;
+        while (SUCCEEDED(pEnum->NextOne(&pMob))) {
+            aafMobID_t id;
+            if (SUCCEEDED(pMob->GetMobID(&id))) {
+                if (formatMobID(id) == mobIdStr) {
+                    mobID = id;
+                    pMob->Release();
+                    pEnum->Release();
+                    return true;
+                }
+            }
+            pMob->Release();
+        }
+        pEnum->Release();
+    }
+
+    // Если не нашли полный MobID, парсим только material часть как раньше
     std::string cleanStr = mobIdStr;
-    // Убираем все дефисы
     cleanStr.erase(std::remove(cleanStr.begin(), cleanStr.end(), '-'), cleanStr.end());
 
-    if (cleanStr.length() < 32) return false;
+    if (cleanStr.length() < 32)
+        return false;
 
     try {
-        // Парсим по частям в material (aafUID_t)
         mobID.material.Data1 = static_cast<aafUInt32>(std::stoul(cleanStr.substr(0, 8), nullptr, 16));
         mobID.material.Data2 = static_cast<aafUInt16>(std::stoul(cleanStr.substr(8, 4), nullptr, 16));
         mobID.material.Data3 = static_cast<aafUInt16>(std::stoul(cleanStr.substr(12, 4), nullptr, 16));
-
-        // Data4 это массив из 8 байт
         for (int i = 0; i < 8; i++) {
-            mobID.material.Data4[i] = static_cast<aafUInt8>(std::stoul(cleanStr.substr(16 + i*2, 2), nullptr, 16));
+            mobID.material.Data4[i] = static_cast<aafUInt8>(std::stoul(cleanStr.substr(16 + i * 2, 2), nullptr, 16));
         }
     } catch (...) {
         return false;
     }
 
-    // Инициализируем другие поля MobID значениями по умолчанию
-    memset(mobID.SMPTELabel, 0, sizeof(mobID.SMPTELabel));
-    mobID.length = 0;
-    mobID.instanceHigh = 0;
-    mobID.instanceMid = 0;
-    mobID.instanceLow = 0;
+    // Значения по умолчанию из спецификации AAF
+    static const aafUInt8 prefix[12] = {0x06,0x0e,0x2b,0x34,0x04,0x01,0x01,0x01,0x0d,0x01,0x02,0x01};
+    memcpy(mobID.SMPTELabel, prefix, sizeof(prefix));
+    mobID.length = 0x10;
+    mobID.instanceHigh = 0x60;
+    mobID.instanceMid = 0x01;
+    mobID.instanceLow = 0x01;
 
     return true;
 }
