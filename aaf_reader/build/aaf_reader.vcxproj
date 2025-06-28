@@ -334,14 +334,16 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   <ItemGroup>
     <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\main_new.cpp" />
     <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_utils.cpp" />
-    <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_parser.cpp" />
+    <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_proper_parser.cpp" />
     <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\media_utils.cpp" />
     <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\csv_export.cpp" />
+    <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\debug_logger.cpp" />
     <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\data_structures.h" />
     <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_utils.h" />
-    <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_parser.h" />
+    <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_proper_parser.h" />
     <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\media_utils.h" />
     <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\csv_export.h" />
+    <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\debug_logger.h" />
   </ItemGroup>
   <ItemGroup />
   <ItemGroup>

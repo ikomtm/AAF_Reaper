@@ -1,0 +1,977 @@
+#include "aaf_proper_parser.h"
+#include "aaf_utils.h"
+#include "debug_logger.h"
+#include <AAFTypeDefUIDs.h>
+#include <AAFClassDefUIDs.h>
+#include <AAFDataDefs.h>
+#include <AAFOperationDefs.h>
+#include <AAFEssenceFormats.h>
+#include <filesystem>
+#include <sstream>
+#include <algorithm>
+#include <cstring>
+#include <cstdlib>
+
+AAFProperParser::AAFProperParser(IAAFHeader* pHeader, std::ofstream& outLog, LogLevel logLevel)
+    : m_pHeader(pHeader), m_out(outLog), logger(outLog, logLevel) {
+}
+
+AAFProperParser::~AAFProperParser() {
+    // Освобождаем ресурсы если нужно
+}
+
+bool AAFProperParser::parseAAFFile() {
+    if (!m_pHeader) {
+        logger.error(LogCategory::PARSER, "No header provided");
+        return false;
+    }
+    
+    logger.beginSection("AAF PROPER PARSER");
+    
+    // Шаг 1: Найти TopLevel CompositionMob
+    IAAFMob* pTopLevelComp = findTopLevelCompositionMob();
+    if (!pTopLevelComp) {
+        logger.error(LogCategory::PARSER, "No TopLevel CompositionMob found");
+        return false;
+    }
+    
+    // Получаем имя проекта
+    aafWChar projectName[256] = {0};
+    if (SUCCEEDED(pTopLevelComp->GetName(projectName, sizeof(projectName)))) {
+        std::string projectNameStr = wideToUtf8(projectName);
+        logger.info(LogCategory::PARSER, "Project: " + projectNameStr);
+    }
+    
+    // Шаг 2: Найти все аудио TimelineMobSlot
+    std::vector<IAAFMobSlot*> audioSlots = findAudioTimelineSlots(pTopLevelComp);
+    logger.info(LogCategory::TRACKS, "Found " + std::to_string(audioSlots.size()) + " audio timeline slots");
+    
+    // Обрабатываем каждый аудио слот
+    for (size_t i = 0; i < audioSlots.size(); ++i) {
+        IAAFMobSlot* pSlot = audioSlots[i];
+        AAFAudioTrackInfo trackInfo;
+        
+        // Получаем основную информацию о треке
+        pSlot->GetSlotID(&trackInfo.slotID);
+        
+        aafWChar slotName[256] = {0};
+        if (SUCCEEDED(pSlot->GetName(slotName, sizeof(slotName)))) {
+            trackInfo.trackName = wideToUtf8(slotName);
+        }
+        if (trackInfo.trackName.empty()) {
+            trackInfo.trackName = "Audio Track " + std::to_string(i + 1);
+        }
+        
+        // Получаем EditRate и Origin
+        IAAFTimelineMobSlot* pTimelineSlot = nullptr;
+        if (SUCCEEDED(pSlot->QueryInterface(IID_IAAFTimelineMobSlot, (void**)&pTimelineSlot))) {
+            pTimelineSlot->GetEditRate(&trackInfo.editRate);
+            pTimelineSlot->GetOrigin(&trackInfo.origin);
+            pTimelineSlot->Release();
+        } else {
+            // Значения по умолчанию
+            trackInfo.editRate = {25, 1};
+            trackInfo.origin = 0;
+        }
+        
+        logger.debug(LogCategory::TRACKS, "Processing track: " + trackInfo.trackName + 
+                    " (SlotID: " + std::to_string(trackInfo.slotID) + ")");
+        
+        // Получаем сегмент слота
+        IAAFSegment* pSegment = nullptr;
+        if (SUCCEEDED(pSlot->GetSegment(&pSegment))) {
+            // Обрабатываем сегмент для поиска SourceClip
+            processSegmentForClips(pSegment, trackInfo, trackInfo.origin);
+            pSegment->Release();
+        }
+        
+        logger.info(LogCategory::TRACKS, "Track \"" + trackInfo.trackName + 
+                   "\" contains " + std::to_string(trackInfo.clips.size()) + " clips");
+        audioTracks.push_back(trackInfo);
+        
+        pSlot->Release();
+    }
+    
+    pTopLevelComp->Release();
+    
+    // Подготавливаем сводку
+    std::map<std::string, std::string> summary;
+    summary["Tracks parsed"] = std::to_string(audioTracks.size());
+    
+    int totalClips = 0;
+    for (const auto& track : audioTracks) {
+        totalClips += static_cast<int>(track.clips.size());
+    }
+    summary["Total clips found"] = std::to_string(totalClips);
+    
+    logger.logSummary("AAF Parsing Summary", summary);
+    logger.logResult(LogCategory::PARSER, "AAF parsing", true, 
+                    std::to_string(audioTracks.size()) + " tracks parsed");
+    logger.endSection("AAF PROPER PARSER");
+    return true;
+}
+
+IAAFMob* AAFProperParser::findTopLevelCompositionMob() {
+    logger.info(LogCategory::PARSER, "Searching for TopLevel CompositionMob...");
+    
+    // Ищем CompositionMob
+    aafSearchCrit_t searchCrit;
+    searchCrit.searchTag = kAAFByMobKind;
+    searchCrit.tags.mobKind = kAAFCompMob;
+    
+    IEnumAAFMobs* pMobEnum = nullptr;
+    if (FAILED(m_pHeader->GetMobs(&searchCrit, &pMobEnum))) {
+        logger.error(LogCategory::PARSER, "Failed to get CompositionMobs");
+        return nullptr;
+    }
+    
+    IAAFMob* pMob = nullptr;
+    IAAFMob* pTopLevelMob = nullptr;
+    
+    while (SUCCEEDED(pMobEnum->NextOne(&pMob))) {
+        // Проверяем UsageCode
+        if (isTopLevelComposition(pMob)) {
+            logger.info(LogCategory::PARSER, "Found TopLevel CompositionMob");
+            pTopLevelMob = pMob;
+            pMob = nullptr; // Не освобождаем, так как возвращаем
+            break;
+        }
+        pMob->Release();
+    }
+    
+    pMobEnum->Release();
+    
+    // Если не нашли по UsageCode, берем первый CompositionMob
+    if (!pTopLevelMob) {
+        logger.warn(LogCategory::PARSER, "No UsageCode TopLevel found, using first CompositionMob");
+        pMobEnum = nullptr;
+        if (SUCCEEDED(m_pHeader->GetMobs(&searchCrit, &pMobEnum))) {
+            if (SUCCEEDED(pMobEnum->NextOne(&pTopLevelMob))) {
+                logger.info(LogCategory::PARSER, "Using first CompositionMob as TopLevel");
+            }
+            pMobEnum->Release();
+        }
+    }
+    
+    return pTopLevelMob;
+}
+
+bool AAFProperParser::isTopLevelComposition(IAAFMob* pMob) {
+    if (!pMob) return false;
+    
+    // Упрощенная проверка - считаем первый CompositionMob как TopLevel
+    IAAFCompositionMob* pCompMob = nullptr;
+    if (SUCCEEDED(pMob->QueryInterface(IID_IAAFCompositionMob, (void**)&pCompMob))) {
+        pCompMob->Release();
+        return true; // Первый найденный CompositionMob считаем TopLevel
+    }
+    
+    return false;
+}
+
+std::vector<IAAFMobSlot*> AAFProperParser::findAudioTimelineSlots(IAAFMob* pCompositionMob) {
+    logger.info(LogCategory::TRACKS, "Searching for Audio TimelineMobSlots...");
+    
+    std::vector<IAAFMobSlot*> audioSlots;
+    
+    aafNumSlots_t numSlots = 0;
+    if (FAILED(pCompositionMob->CountSlots(&numSlots))) {
+        logger.error(LogCategory::TRACKS, "Failed to count slots in CompositionMob");
+        return audioSlots;
+    }
+    
+    for (aafUInt32 i = 0; i < numSlots; ++i) {
+        IAAFMobSlot* pSlot = nullptr;
+        if (FAILED(pCompositionMob->GetSlotAt(i, &pSlot))) {
+            continue;
+        }
+        
+        // Проверяем, что это TimelineMobSlot
+        IAAFTimelineMobSlot* pTimelineSlot = nullptr;
+        bool isTimeline = SUCCEEDED(pSlot->QueryInterface(IID_IAAFTimelineMobSlot, (void**)&pTimelineSlot));
+        if (pTimelineSlot) {
+            pTimelineSlot->Release();
+        }
+        
+        if (!isTimeline) {
+            logger.trace(LogCategory::TRACKS, "Slot " + std::to_string(i) + " is not TimelineMobSlot, skipping");
+            pSlot->Release();
+            continue;
+        }
+        
+        // Проверяем DataDef - должен быть Sound
+        IAAFSegment* pSegment = nullptr;
+        if (SUCCEEDED(pSlot->GetSegment(&pSegment))) {
+            IAAFComponent* pComponent = nullptr;
+            if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFComponent, (void**)&pComponent))) {
+                IAAFDataDef* pDataDef = nullptr;
+                if (SUCCEEDED(pComponent->GetDataDef(&pDataDef))) {
+                    if (isAudioDataDef(pDataDef)) {
+                        logger.debug(LogCategory::TRACKS, "Found audio TimelineMobSlot " + std::to_string(i));
+                        audioSlots.push_back(pSlot);
+                        pSlot = nullptr; // Не освобождаем, так как добавили в вектор
+                    } else {
+                        logger.trace(LogCategory::TRACKS, "Slot " + std::to_string(i) + " is not audio, skipping");
+                    }
+                    pDataDef->Release();
+                }
+                pComponent->Release();
+            }
+            pSegment->Release();
+        }
+        
+        if (pSlot) {
+            pSlot->Release();
+        }
+    }
+    
+    logger.info(LogCategory::TRACKS, "Found " + std::to_string(audioSlots.size()) + " audio timeline slots");
+    return audioSlots;
+}
+
+bool AAFProperParser::isAudioDataDef(IAAFDataDef* pDataDef) {
+    if (!pDataDef) return false;
+    
+    // Получаем DefObject для доступа к AUID
+    IAAFDefObject* pDefObj = nullptr;
+    if (FAILED(pDataDef->QueryInterface(IID_IAAFDefObject, (void**)&pDefObj))) {
+        return false;
+    }
+    
+    aafUID_t dataDefID;
+    bool isAudio = false;
+    if (SUCCEEDED(pDefObj->GetAUID(&dataDefID))) {
+        // Сравниваем с kAAFDataDef_Sound
+        isAudio = (memcmp(&dataDefID, &kAAFDataDef_Sound, sizeof(aafUID_t)) == 0);
+    }
+    
+    pDefObj->Release();
+    return isAudio;
+}
+
+void AAFProperParser::processSegmentForClips(IAAFSegment* pSegment, 
+                                            AAFAudioTrackInfo& trackInfo, 
+                                            aafPosition_t currentPosition) {
+    if (!pSegment) return;
+    
+    // Проверяем тип сегмента
+    IAAFSequence* pSequence = nullptr;
+    IAAFSourceClip* pSourceClip = nullptr;
+    IAAFOperationGroup* pOpGroup = nullptr;
+    
+    if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFSequence, (void**)&pSequence))) {
+        // Последовательность компонентов
+        logger.debug(LogCategory::CLIPS, "Processing Sequence");
+        
+        IEnumAAFComponents* pEnum = nullptr;
+        if (SUCCEEDED(pSequence->GetComponents(&pEnum))) {
+            IAAFComponent* pComponent = nullptr;
+            aafPosition_t seqPosition = currentPosition;
+            
+            while (SUCCEEDED(pEnum->NextOne(&pComponent))) {
+                aafLength_t componentLength = 0;
+                pComponent->GetLength(&componentLength);
+                
+                // Рекурсивно обрабатываем компонент
+                IAAFSegment* pComponentSegment = nullptr;
+                if (SUCCEEDED(pComponent->QueryInterface(IID_IAAFSegment, (void**)&pComponentSegment))) {
+                    processSegmentForClips(pComponentSegment, trackInfo, seqPosition);
+                    pComponentSegment->Release();
+                }
+                
+                seqPosition += componentLength;
+                pComponent->Release();
+            }
+            pEnum->Release();
+        }
+        pSequence->Release();
+        
+    } else if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFSourceClip, (void**)&pSourceClip))) {
+        // Прямой SourceClip
+        logger.debug(LogCategory::CLIPS, "Processing SourceClip");
+        
+        // Шаг 3: Обрабатываем SourceClip -> MasterMob цепочку
+        AAFAudioClipInfo clipInfo = processSourceClipChain(pSourceClip, trackInfo.editRate, currentPosition);
+        if (!clipInfo.mobID.empty()) {
+            trackInfo.clips.push_back(clipInfo);
+        }
+        
+        pSourceClip->Release();
+        
+    } else if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFOperationGroup, (void**)&pOpGroup))) {
+        // OperationGroup (эффекты, фейды)
+        logger.debug(LogCategory::CLIPS, "Processing OperationGroup (effects)");
+        
+        // Обрабатываем входные сегменты
+        aafUInt32 numInputs = 0;
+        if (SUCCEEDED(pOpGroup->CountSourceSegments(&numInputs))) {
+            for (aafUInt32 i = 0; i < numInputs; ++i) {
+                IAAFSegment* pInputSegment = nullptr;
+                if (SUCCEEDED(pOpGroup->GetInputSegmentAt(i, &pInputSegment))) {
+                    processSegmentForClips(pInputSegment, trackInfo, currentPosition);
+                    pInputSegment->Release();
+                }
+            }
+        }
+        
+        pOpGroup->Release();
+    } else {
+        logger.trace(LogCategory::CLIPS, "Unknown segment type, skipping");
+    }
+}
+
+AAFAudioClipInfo AAFProperParser::processSourceClipChain(IAAFSourceClip* pSourceClip, 
+                                                        const aafRational_t& editRate,
+                                                        aafPosition_t timelinePosition) {
+    AAFAudioClipInfo clipInfo = {};
+    
+    // Инициализируем поля
+    clipInfo.originalFileName = "";
+    clipInfo.extractedFilePath = "";
+    clipInfo.mobID = "";
+    clipInfo.timelineStart = 0;
+    clipInfo.timelineEnd = 0;
+    clipInfo.sourceStart = 0;
+    clipInfo.duration = 0;
+    clipInfo.sampleRate = {48000, 1};
+    clipInfo.channelCount = 2;
+    clipInfo.bitsPerSample = 16;
+    clipInfo.compressionType = "PCM";
+    clipInfo.sourceType = "Unknown";
+    clipInfo.isEmbedded = false;
+    clipInfo.hasFadeIn = false;
+    clipInfo.hasFadeOut = false;
+    clipInfo.fadeInLength = 0;
+    clipInfo.fadeOutLength = 0;
+    
+    if (!pSourceClip) return clipInfo;
+    
+    logger.debug(LogCategory::CLIPS, "Processing SourceClip chain...");
+    
+    // Получаем SourceReference
+    aafSourceRef_t sourceRef;
+    if (FAILED(pSourceClip->GetSourceReference(&sourceRef))) {
+        logger.error(LogCategory::CLIPS, "Failed to get SourceReference");
+        return clipInfo;
+    }
+    
+    clipInfo.mobID = formatMobID(sourceRef.sourceID);
+    clipInfo.sourceStart = sourceRef.startTime;
+    clipInfo.timelineStart = timelinePosition;
+    
+    // Получаем длительность
+    IAAFComponent* pComponent = nullptr;
+    if (SUCCEEDED(pSourceClip->QueryInterface(IID_IAAFComponent, (void**)&pComponent))) {
+        pComponent->GetLength(&clipInfo.duration);
+        clipInfo.timelineEnd = timelinePosition + clipInfo.duration;
+        pComponent->Release();
+    }
+    
+    logger.debug(LogCategory::CLIPS, "SourceClip references MobID: " + clipInfo.mobID);
+    
+    // Ищем MasterMob
+    IAAFMob* pMasterMob = nullptr;
+    if (SUCCEEDED(m_pHeader->LookupMob(sourceRef.sourceID, &pMasterMob))) {
+        logger.debug(LogCategory::CLIPS, "Found MasterMob");
+        
+        // Шаг 4: Найти FileSourceMob из MasterMob
+        IAAFSourceMob* pFileSourceMob = findFileSourceMobFromMaster(pMasterMob);
+        if (pFileSourceMob) {
+            logger.debug(LogCategory::CLIPS, "Found FileSourceMob");
+            
+            // Шаг 5: Получить аудио свойства
+            getAudioProperties(pFileSourceMob, clipInfo);
+            
+            // Получить имя файла из различных источников
+            clipInfo.originalFileName = getFileNameFromLocator(pFileSourceMob);
+            if (clipInfo.originalFileName.empty()) {
+                // Fallback к имени из MobName
+                IAAFMob* pMob = nullptr;
+                if (SUCCEEDED(pFileSourceMob->QueryInterface(IID_IAAFMob, (void**)&pMob))) {
+                    aafWChar name[256] = {0};
+                    if (SUCCEEDED(pMob->GetName(name, sizeof(name)))) {
+                        clipInfo.originalFileName = wideToUtf8(name);
+                    }
+                    pMob->Release();
+                }
+            }
+            
+            // Шаг 6: Определить тип источника (Embedded vs External)
+            clipInfo.isEmbedded = checkIfEmbedded(pFileSourceMob);
+            clipInfo.sourceType = clipInfo.isEmbedded ? "Embedded" : "External";
+            
+            logger.debug(LogCategory::CLIPS, "Clip source type: " + clipInfo.sourceType);
+            
+            pFileSourceMob->Release();
+        } else {
+            // Если FileSourceMob не найден, попробуем получить имя из MasterMob
+            aafWChar masterMobName[256] = {0};
+            if (SUCCEEDED(pMasterMob->GetName(masterMobName, sizeof(masterMobName)))) {
+                clipInfo.originalFileName = wideToUtf8(masterMobName);
+            }
+            
+            // Если нет FileSourceMob, это может быть embedded
+            clipInfo.isEmbedded = true;
+            clipInfo.sourceType = "Embedded";
+        }
+        
+        pMasterMob->Release();
+    } else {
+        logger.warn(LogCategory::CLIPS, "MasterMob not found for " + clipInfo.mobID);
+    }
+    
+    return clipInfo;
+}
+
+IAAFSourceMob* AAFProperParser::findFileSourceMobFromMaster(IAAFMob* pMasterMob) {
+    if (!pMasterMob) return nullptr;
+    
+    logger.debug(LogCategory::ESSENCE, "Searching for FileSourceMob from MasterMob...");
+    
+    // Получаем слоты MasterMob
+    aafNumSlots_t numSlots = 0;
+    if (FAILED(pMasterMob->CountSlots(&numSlots))) {
+        return nullptr;
+    }
+    
+    for (aafUInt32 i = 0; i < numSlots; ++i) {
+        IAAFMobSlot* pSlot = nullptr;
+        if (FAILED(pMasterMob->GetSlotAt(i, &pSlot))) {
+            continue;
+        }
+        
+        IAAFSegment* pSegment = nullptr;
+        if (SUCCEEDED(pSlot->GetSegment(&pSegment))) {
+            IAAFSourceClip* pSourceClip = nullptr;
+            if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFSourceClip, (void**)&pSourceClip))) {
+                aafSourceRef_t sourceRef;
+                if (SUCCEEDED(pSourceClip->GetSourceReference(&sourceRef))) {
+                    // Ищем SourceMob (FileSourceMob)
+                    IAAFMob* pSourceMob = nullptr;
+                    if (SUCCEEDED(m_pHeader->LookupMob(sourceRef.sourceID, &pSourceMob))) {
+                        IAAFSourceMob* pFileSourceMob = nullptr;
+                        if (SUCCEEDED(pSourceMob->QueryInterface(IID_IAAFSourceMob, (void**)&pFileSourceMob))) {
+                            logger.debug(LogCategory::ESSENCE, "Found FileSourceMob");
+                            pSourceMob->Release();
+                            pSourceClip->Release();
+                            pSegment->Release();
+                            pSlot->Release();
+                            return pFileSourceMob;
+                        }
+                        pSourceMob->Release();
+                    }
+                }
+                pSourceClip->Release();
+            }
+            pSegment->Release();
+        }
+        pSlot->Release();
+    }
+    
+    return nullptr;
+}
+
+bool AAFProperParser::getAudioProperties(IAAFSourceMob* pSourceMob, AAFAudioClipInfo& clipInfo) {
+    if (!pSourceMob) return false;
+    
+    logger.debug(LogCategory::ESSENCE, "Getting audio properties from EssenceDescriptor...");
+    
+    IAAFEssenceDescriptor* pEssenceDesc = nullptr;
+    if (FAILED(pSourceMob->GetEssenceDescriptor(&pEssenceDesc))) {
+        logger.error(LogCategory::ESSENCE, "Failed to get EssenceDescriptor");
+        return false;
+    }
+    
+    // Пытаемся получить SoundDescriptor
+    IAAFSoundDescriptor* pSoundDesc = nullptr;
+    if (SUCCEEDED(pEssenceDesc->QueryInterface(IID_IAAFSoundDescriptor, (void**)&pSoundDesc))) {
+        // Sample Rate
+        if (SUCCEEDED(pSoundDesc->GetAudioSamplingRate(&clipInfo.sampleRate))) {
+            double rate = (double)clipInfo.sampleRate.numerator / (double)clipInfo.sampleRate.denominator;
+            logger.debug(LogCategory::ESSENCE, "Sample Rate: " + std::to_string(rate) + " Hz");
+        }
+        
+        // Channel Count
+        if (SUCCEEDED(pSoundDesc->GetChannelCount(&clipInfo.channelCount))) {
+            logger.debug(LogCategory::ESSENCE, "Channels: " + std::to_string(clipInfo.channelCount));
+        }
+        
+        // Bits Per Sample
+        if (SUCCEEDED(pSoundDesc->GetQuantizationBits(&clipInfo.bitsPerSample))) {
+            logger.debug(LogCategory::ESSENCE, "Bit Depth: " + std::to_string(clipInfo.bitsPerSample) + " bits");
+        }
+        
+        pSoundDesc->Release();
+    }
+    
+    // Получаем тип сжатия
+    clipInfo.compressionType = getCompressionTypeFromDescriptor(pEssenceDesc);
+    
+    // Пытаемся получить имя файла из FileDescriptor
+    IAAFFileDescriptor* pFileDesc = nullptr;
+    if (SUCCEEDED(pEssenceDesc->QueryInterface(IID_IAAFFileDescriptor, (void**)&pFileDesc))) {
+        // Здесь можно попытаться получить имя файла, если есть такой метод
+        // В AAF SDK нет прямого GetName для FileDescriptor, но есть другие способы
+        pFileDesc->Release();
+    }
+    
+    pEssenceDesc->Release();
+    return true;
+}
+
+std::string AAFProperParser::getCompressionTypeFromDescriptor(IAAFEssenceDescriptor* pEssDesc) {
+    if (!pEssDesc) return "Unknown";
+    
+    // Проверяем различные типы дескрипторов
+    IAAFWAVEDescriptor* pWaveDesc = nullptr;
+    IAAFAIFCDescriptor* pAifcDesc = nullptr;
+    
+    if (SUCCEEDED(pEssDesc->QueryInterface(IID_IAAFWAVEDescriptor, (void**)&pWaveDesc))) {
+        pWaveDesc->Release();
+        return "WAVE";
+    } else if (SUCCEEDED(pEssDesc->QueryInterface(IID_IAAFAIFCDescriptor, (void**)&pAifcDesc))) {
+        pAifcDesc->Release();
+        return "AIFC";
+    }
+    
+    // Проверяем через SoundDescriptor compression
+    IAAFSoundDescriptor* pSoundDesc = nullptr;
+    if (SUCCEEDED(pEssDesc->QueryInterface(IID_IAAFSoundDescriptor, (void**)&pSoundDesc))) {
+        aafUID_t compressionUID;
+        if (SUCCEEDED(pSoundDesc->GetCompression(&compressionUID))) {
+            // Здесь можно сравнить с известными UID сжатия
+            pSoundDesc->Release();
+            return "Compressed";
+        }
+        pSoundDesc->Release();
+    }
+    
+    return "PCM";
+}
+
+bool AAFProperParser::extractEmbeddedAudioClip(const AAFAudioClipInfo& clip, 
+                                              const std::string& outputDir, 
+                                              std::string& outPath) {
+    logger.debug(LogCategory::EXTRACTION, "Extracting embedded audio clip: " + clip.mobID);
+    
+    // 1. Парсим MobID из строки - это ID MasterMob
+    aafMobID_t masterMobID;
+    if (!parseMobIDString(clip.mobID, masterMobID)) {
+        logger.warn(LogCategory::EXTRACTION, "Failed to parse MobID: " + clip.mobID);
+        return false;
+    }
+    
+    // 2. Ищем MasterMob по ID
+    IAAFMob* pMasterMob = nullptr;
+    if (FAILED(m_pHeader->LookupMob(masterMobID, &pMasterMob))) {
+        logger.warn(LogCategory::EXTRACTION, "Failed to find MasterMob with ID: " + clip.mobID);
+        return false;
+    }
+    
+    logger.debug(LogCategory::EXTRACTION, "Found MasterMob, looking for FileSourceMob...");
+    
+    // 3. Найти FileSourceMob из MasterMob
+    IAAFSourceMob* pFileSourceMob = findFileSourceMobFromMaster(pMasterMob);
+    if (!pFileSourceMob) {
+        logger.warn(LogCategory::EXTRACTION, "No FileSourceMob found - this may be external audio");
+        pMasterMob->Release();
+        return false;
+    }
+    
+    // 4. Получаем MobID FileSourceMob для поиска EssenceData
+    IAAFMob* pFileSourceMobBase = nullptr;
+    if (FAILED(pFileSourceMob->QueryInterface(IID_IAAFMob, (void**)&pFileSourceMobBase))) {
+        logger.warn(LogCategory::EXTRACTION, "Failed to get IAAFMob interface from FileSourceMob");
+        pFileSourceMob->Release();
+        pMasterMob->Release();
+        return false;
+    }
+    
+    aafMobID_t fileSourceMobID;
+    if (FAILED(pFileSourceMobBase->GetMobID(&fileSourceMobID))) {
+        logger.warn(LogCategory::EXTRACTION, "Failed to get FileSourceMob ID");
+        pFileSourceMobBase->Release();
+        pFileSourceMob->Release();
+        pMasterMob->Release();
+        return false;
+    }
+    
+    std::string fileSourceMobIDStr = formatMobID(fileSourceMobID);
+    logger.debug(LogCategory::EXTRACTION, "FileSourceMob ID: " + fileSourceMobIDStr);
+    
+    // 5. Определяем имя файла
+    std::string fileName = getFileNameFromLocator(pFileSourceMob);
+    if (fileName.empty()) {
+        fileName = getFileNameFallbackFromSourceMob(pFileSourceMob, fileSourceMobID);
+    }
+    
+    // 6. Создаем путь для вывода
+    std::filesystem::path outFilePath = std::filesystem::path(outputDir) / fileName;
+    outPath = outFilePath.string();
+    std::filesystem::create_directories(std::filesystem::path(outputDir));
+    
+    // 7. Ищем EssenceData по FileSourceMob ID
+    bool extracted = extractEmbeddedEssenceByMobID(fileSourceMobID, outPath);
+    
+    pFileSourceMobBase->Release();
+    pFileSourceMob->Release();
+    pMasterMob->Release();
+    
+    if (extracted) {
+        logger.info(LogCategory::EXTRACTION, "Successfully extracted: " + outPath);
+    } else {
+        logger.warn(LogCategory::EXTRACTION, "Failed to extract essence data for: " + fileSourceMobIDStr);
+    }
+    
+    return extracted;
+}
+}
+
+bool AAFProperParser::extractAllEmbeddedAudio(const std::string& outputDir) {
+    logger.info(LogCategory::EXTRACTION, "Starting extraction of all embedded audio to: " + outputDir);
+    
+    int extractedCount = 0;
+    int failedCount = 0;
+    
+    // Создаем выходную директорию
+    std::filesystem::create_directories(outputDir);
+    
+    // Проходим по всем трекам и клипам
+    for (const auto& track : audioTracks) {
+        logger.debug(LogCategory::EXTRACTION, "Processing track: " + track.trackName);
+        
+        for (const auto& clip : track.clips) {
+            // Проверяем, является ли клип embedded
+            if (clip.sourceType == "Embedded" || clip.isEmbedded) {
+                std::string extractedPath;
+                if (extractEmbeddedAudioClip(clip, outputDir, extractedPath)) {
+                    logger.info(LogCategory::EXTRACTION, "✅ Extracted: " + extractedPath);
+                    extractedCount++;
+                } else {
+                    logger.warn(LogCategory::EXTRACTION, "❌ Failed to extract: " + clip.mobID);
+                    failedCount++;
+                }
+            } else {
+                logger.debug(LogCategory::EXTRACTION, "Skipping external clip: " + clip.originalFileName);
+            }
+        }
+    }
+    
+    logger.logSummary("Embedded Audio Extraction", {
+        {"Extracted", std::to_string(extractedCount)},
+        {"Failed", std::to_string(failedCount)},
+        {"Output Directory", outputDir}
+    });
+    
+    return extractedCount > 0;
+}
+
+bool AAFProperParser::parseMobIDString(const std::string& mobIdStr, aafMobID_t& mobID) {
+    if (mobIdStr.length() < 36) return false; // Минимальная длина UUID
+    
+    // Парсим строку формата: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+    // В aafMobID_t material это aafUID_t
+    try {
+        std::string cleanStr = mobIdStr;
+        // Убираем все дефисы
+        cleanStr.erase(std::remove(cleanStr.begin(), cleanStr.end(), '-'), cleanStr.end());
+        
+        if (cleanStr.length() < 32) return false;
+        
+        // Парсим по частям в material (aafUID_t)
+        mobID.material.Data1 = static_cast<aafUInt32>(std::stoul(cleanStr.substr(0, 8), nullptr, 16));
+        mobID.material.Data2 = static_cast<aafUInt16>(std::stoul(cleanStr.substr(8, 4), nullptr, 16));
+        mobID.material.Data3 = static_cast<aafUInt16>(std::stoul(cleanStr.substr(12, 4), nullptr, 16));
+        
+        // Data4 это массив из 8 байт
+        for (int i = 0; i < 8; i++) {
+            mobID.material.Data4[i] = static_cast<aafUInt8>(std::stoul(cleanStr.substr(16 + i*2, 2), nullptr, 16));
+        }
+        
+        // Инициализируем другие поля MobID значениями по умолчанию
+        memset(mobID.SMPTELabel, 0, sizeof(mobID.SMPTELabel));
+        mobID.length = 0;
+        mobID.instanceHigh = 0;
+        mobID.instanceMid = 0;
+        mobID.instanceLow = 0;
+        
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool AAFProperParser::checkIfEmbedded(IAAFSourceMob* pSourceMob) {
+    if (!pSourceMob) return false;
+    
+    logger.debug(LogCategory::ESSENCE, "Checking if SourceMob has embedded essence...");
+    
+    // Получаем MobID SourceMob через IAAFMob интерфейс
+    IAAFMob* pMob = nullptr;
+    if (FAILED(pSourceMob->QueryInterface(IID_IAAFMob, (void**)&pMob))) {
+        logger.warn(LogCategory::ESSENCE, "Failed to query IAAFMob interface");
+        return false;
+    }
+    
+    aafMobID_t sourceMobID;
+    if (FAILED(pMob->GetMobID(&sourceMobID))) {
+        logger.warn(LogCategory::ESSENCE, "Failed to get SourceMob ID");
+        pMob->Release();
+        return false;
+    }
+    pMob->Release();
+    
+    // Сначала пробуем быстрый метод через LookupEssenceData
+    IAAFContentStorage* pStorage = nullptr;
+    if (SUCCEEDED(m_pHeader->GetContentStorage(&pStorage))) {
+        IAAFEssenceData* pEssenceData = nullptr;
+        if (SUCCEEDED(pStorage->LookupEssenceData(sourceMobID, &pEssenceData))) {
+            // Проверяем размер данных
+            aafLength_t dataSize;
+            bool hasData = SUCCEEDED(pEssenceData->GetSize(&dataSize)) && dataSize > 0;
+            
+            if (hasData) {
+                logger.debug(LogCategory::ESSENCE, "Found embedded EssenceData via LookupEssenceData with size: " + std::to_string(dataSize));
+            }
+            
+            pEssenceData->Release();
+            pStorage->Release();
+            return hasData;
+        }
+        pStorage->Release();
+    }
+    
+    // Fallback к методу через перечисление
+    IEnumAAFEssenceData* pEssenceEnum = nullptr;
+    if (FAILED(m_pHeader->EnumEssenceData(&pEssenceEnum))) {
+        logger.debug(LogCategory::ESSENCE, "No EssenceData enumeration available");
+        return false;
+    }
+    
+    IAAFEssenceData* pEssenceData = nullptr;
+    bool hasEmbeddedData = false;
+    
+    while (SUCCEEDED(pEssenceEnum->NextOne(&pEssenceData))) {
+        aafMobID_t essenceMobID;
+        if (SUCCEEDED(pEssenceData->GetFileMobID(&essenceMobID))) {
+            if (isSameMobID(sourceMobID, essenceMobID)) {
+                aafLength_t dataSize;
+                if (SUCCEEDED(pEssenceData->GetSize(&dataSize)) && dataSize > 0) {
+                    hasEmbeddedData = true;
+                    logger.debug(LogCategory::ESSENCE, "Found embedded EssenceData via enumeration with size: " + std::to_string(dataSize));
+                }
+                pEssenceData->Release();
+                break;
+            }
+        }
+        pEssenceData->Release();
+    }
+    
+    pEssenceEnum->Release();
+    
+    // Дополнительно проверяем наличие внешних ссылок через Locator
+    if (!hasEmbeddedData) {
+        IAAFEssenceDescriptor* pEssenceDesc = nullptr;
+        if (SUCCEEDED(pSourceMob->GetEssenceDescriptor(&pEssenceDesc))) {
+            aafUInt32 numLocators = 0;
+            if (SUCCEEDED(pEssenceDesc->CountLocators(&numLocators)) && numLocators > 0) {
+                logger.debug(LogCategory::ESSENCE, "Found " + std::to_string(numLocators) + " external locators - not embedded");
+                pEssenceDesc->Release();
+                return false;
+            }
+            pEssenceDesc->Release();
+        }
+    }
+    
+    logger.debug(LogCategory::ESSENCE, "Embedded status: " + std::string(hasEmbeddedData ? "true" : "false"));
+    return hasEmbeddedData;
+}
+
+// Улучшенная логика извлечения EssenceData (используя LookupEssenceData)
+bool AAFProperParser::extractEmbeddedEssenceByMobID(const aafMobID_t& mobID, const std::string& outputPath) {
+    logger.debug(LogCategory::EXTRACTION, "Extracting essence using LookupEssenceData");
+    
+    // Используем более эффективный метод LookupEssenceData через ContentStorage
+    IAAFContentStorage* pStorage = nullptr;
+    if (FAILED(m_pHeader->GetContentStorage(&pStorage))) {
+        logger.warn(LogCategory::EXTRACTION, "Failed to get ContentStorage");
+        return false;
+    }
+    
+    IAAFEssenceData* pEssence = nullptr;
+    HRESULT hr = pStorage->LookupEssenceData(mobID, &pEssence);
+    if (FAILED(hr)) {
+        logger.debug(LogCategory::EXTRACTION, "No EssenceData found via LookupEssenceData, falling back to enumeration");
+        pStorage->Release();
+        
+        // Fallback к старому методу через перечисление
+        return extractEmbeddedEssenceByMobID_Fallback(mobID, outputPath);
+    }
+    
+    // Открываем файл для записи
+    std::ofstream outFile(outputPath, std::ios::binary);
+    if (!outFile.is_open()) {
+        logger.error(LogCategory::EXTRACTION, "Failed to create output file: " + outputPath);
+        pEssence->Release();
+        pStorage->Release();
+        return false;
+    }
+    
+    // Читаем данные блоками для эффективности
+    const size_t bufSize = 8192; // 8KB буфер
+    std::vector<aafUInt8> buffer(bufSize);
+    aafUInt32 readBytes = 0;
+    size_t totalBytes = 0;
+    
+    logger.info(LogCategory::EXTRACTION, "Reading essence data in 8KB chunks...");
+    
+    while (SUCCEEDED(pEssence->Read(static_cast<aafUInt32>(bufSize), buffer.data(), &readBytes)) && readBytes > 0) {
+        outFile.write(reinterpret_cast<const char*>(buffer.data()), readBytes);
+        totalBytes += readBytes;
+        
+        // Логируем прогресс каждые 1MB
+        if (totalBytes % (1024 * 1024) == 0) {
+            logger.debug(LogCategory::EXTRACTION, "Read " + std::to_string(totalBytes / (1024 * 1024)) + " MB...");
+        }
+    }
+    
+    outFile.close();
+    logger.info(LogCategory::EXTRACTION, "Successfully extracted " + std::to_string(totalBytes) + " bytes");
+    
+    pEssence->Release();
+    pStorage->Release();
+    return true;
+}
+
+// Fallback метод для извлечения через перечисление (на случай если LookupEssenceData не работает)
+bool AAFProperParser::extractEmbeddedEssenceByMobID_Fallback(const aafMobID_t& mobID, const std::string& outputPath) {
+    logger.debug(LogCategory::EXTRACTION, "Using fallback enumeration method");
+    
+    IEnumAAFEssenceData* pEnum = nullptr;
+    if (FAILED(m_pHeader->EnumEssenceData(&pEnum))) {
+        logger.warn(LogCategory::EXTRACTION, "Failed to get EssenceData enumeration");
+        return false;
+    }
+    
+    IAAFEssenceData* pEssence = nullptr;
+    bool found = false;
+    
+    while (SUCCEEDED(pEnum->NextOne(&pEssence))) {
+        aafMobID_t essenceMobID;
+        if (SUCCEEDED(pEssence->GetFileMobID(&essenceMobID)) && isSameMobID(essenceMobID, mobID)) {
+            found = true;
+            
+            std::ofstream outFile(outputPath, std::ios::binary);
+            if (!outFile.is_open()) {
+                logger.error(LogCategory::EXTRACTION, "Failed to create output file: " + outputPath);
+                pEssence->Release();
+                pEnum->Release();
+                return false;
+            }
+            
+            const size_t bufSize = 8192;
+            std::vector<aafUInt8> buffer(bufSize);
+            aafUInt32 readBytes = 0;
+            size_t totalBytes = 0;
+            
+            while (SUCCEEDED(pEssence->Read(static_cast<aafUInt32>(bufSize), buffer.data(), &readBytes)) && readBytes > 0) {
+                outFile.write(reinterpret_cast<const char*>(buffer.data()), readBytes);
+                totalBytes += readBytes;
+            }
+            
+            outFile.close();
+            logger.info(LogCategory::EXTRACTION, "Successfully extracted " + std::to_string(totalBytes) + " bytes via fallback");
+            
+            pEssence->Release();
+            break;
+        }
+        pEssence->Release();
+    }
+    
+    pEnum->Release();
+    return found;
+}
+
+// Улучшенное получение имени файла из EssenceDescriptor через Locator
+std::string AAFProperParser::getFileNameFromLocator(IAAFSourceMob* pSourceMob) {
+    if (!pSourceMob) return "";
+    
+    logger.debug(LogCategory::EXTRACTION, "Getting filename from EssenceDescriptor Locator...");
+    
+    IAAFEssenceDescriptor* pDesc = nullptr;
+    if (FAILED(pSourceMob->GetEssenceDescriptor(&pDesc))) {
+        logger.debug(LogCategory::EXTRACTION, "No EssenceDescriptor found");
+        return "";
+    }
+    
+    // Получаем Locators напрямую из EssenceDescriptor
+    IEnumAAFLocators* pLocEnum = nullptr;
+    if (FAILED(pDesc->GetLocators(&pLocEnum))) {
+        logger.debug(LogCategory::EXTRACTION, "No Locators found in EssenceDescriptor");
+        pDesc->Release();
+        return "";
+    }
+    
+    IAAFLocator* pLoc = nullptr;
+    std::string fileName;
+    
+    while (SUCCEEDED(pLocEnum->NextOne(&pLoc))) {
+        // Получаем путь из Locator
+        aafWChar filePath[1024] = {0};
+        if (SUCCEEDED(pLoc->GetPath(filePath, sizeof(filePath)))) {
+            std::wstring wPath(filePath);
+            std::string path = wideToUtf8(wPath);
+            
+            // Извлекаем только имя файла из полного пути
+            size_t pos = path.find_last_of("/\\");
+            fileName = (pos != std::string::npos) ? path.substr(pos + 1) : path;
+            
+            logger.debug(LogCategory::EXTRACTION, "Found filename in Locator: " + fileName);
+            pLoc->Release();
+            break;
+        }
+        pLoc->Release();
+    }
+    
+    pLocEnum->Release();
+    pDesc->Release();
+    
+    return fileName;
+}
+
+// Fallback получение имени файла из имени SourceMob
+std::string AAFProperParser::getFileNameFallbackFromSourceMob(IAAFSourceMob* pSourceMob, const aafMobID_t& mobID) {
+    if (!pSourceMob) {
+        return "essence_" + formatMobID(mobID).substr(0, 8) + ".dat";
+    }
+    
+    logger.debug(LogCategory::EXTRACTION, "Using fallback filename from SourceMob name...");
+    
+    IAAFMob* pMob = nullptr;
+    if (SUCCEEDED(pSourceMob->QueryInterface(IID_IAAFMob, (void**)&pMob))) {
+        aafWChar name[256] = {0};
+        if (SUCCEEDED(pMob->GetName(name, sizeof(name)))) {
+            std::wstring wName(name);
+            std::string mobName = wideToUtf8(wName);
+            pMob->Release();
+            
+            if (!mobName.empty()) {
+                // Если имя не содержит расширение, добавляем .dat
+                if (mobName.find('.') == std::string::npos) {
+                    mobName += ".dat";
+                }
+                logger.debug(LogCategory::EXTRACTION, "Using SourceMob name as filename: " + mobName);
+                return mobName;
+            }
+        }
+        pMob->Release();
+    }
+    
+    // Последний fallback - используем MobID
+    std::string fallbackName = "essence_" + formatMobID(mobID).substr(0, 8) + ".dat";
+    logger.debug(LogCategory::EXTRACTION, "Using MobID-based fallback: " + fallbackName);
+    return fallbackName;
+}
+
+
+

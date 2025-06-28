@@ -13,18 +13,57 @@
 #include <map>
 #include <memory>
 #include <iomanip>
+#include <chrono>
 
 // Наши модули
 #include "data_structures.h"
 #include "aaf_utils.h"
-#include "aaf_parser.h"
+#include "aaf_proper_parser.h"
 #include "media_utils.h"
 #include "csv_export.h"
 
 int main(int argc, char* argv[]) {
+    // Проверяем на помощь в первую очередь
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--help") {
+            std::cout << "Usage: aaf_reader <file.aaf> [options]" << std::endl;
+            std::cout << "Options:" << std::endl;
+            std::cout << "  --log-level=LEVEL    Set log level (ERROR, WARN, INFO, DEBUG, TRACE)" << std::endl;
+            std::cout << "  --help               Show this help message" << std::endl;
+            std::cout << "\nLevels explanation:" << std::endl;
+            std::cout << "  ERROR: Only critical errors" << std::endl;
+            std::cout << "  WARN:  Errors and warnings" << std::endl;
+            std::cout << "  INFO:  General information (default)" << std::endl;
+            std::cout << "  DEBUG: Detailed debugging information" << std::endl;
+            std::cout << "  TRACE: Maximum verbosity" << std::endl;
+            return 0;
+        }
+    }
+    
     if (argc < 2) {
-        std::cerr << "ERROR: Usage: aaf_reader <file.aaf>" << std::endl;
+        std::cerr << "ERROR: Usage: aaf_reader <file.aaf> [--log-level=LEVEL]" << std::endl;
+        std::cerr << "  LEVEL can be: ERROR, WARN, INFO, DEBUG, TRACE" << std::endl;
+        std::cerr << "Use --help for more information." << std::endl;
         return 1;
+    }
+    
+    std::string aafFilePath = argv[1];
+    LogLevel logLevel = LogLevel::LOG_INFO; // По умолчанию
+    
+    // Парсим аргументы командной строки
+    for (int i = 2; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg.substr(0, 12) == "--log-level=") {
+            std::string levelStr = arg.substr(12);
+            if (levelStr == "ERROR") logLevel = LogLevel::LOG_ERROR;
+            else if (levelStr == "WARN") logLevel = LogLevel::LOG_WARN;
+            else if (levelStr == "INFO") logLevel = LogLevel::LOG_INFO;
+            else if (levelStr == "DEBUG") logLevel = LogLevel::LOG_DEBUG;
+            else if (levelStr == "TRACE") logLevel = LogLevel::LOG_TRACE;
+            else {
+                std::cerr << "WARNING: Unknown log level: " << levelStr << std::endl;
+            }
+        }
     }
 
     ProjectData projectData;
@@ -41,12 +80,13 @@ int main(int argc, char* argv[]) {
     std::ofstream out("output.txt");
     out << "[*] Opening AAF file..." << std::endl;
     out << "[*] Created extracted_media and audio_files folders" << std::endl;
+    out << "[*] Log level: " << static_cast<int>(logLevel) << std::endl;
 
     // Конвертируем путь в wide string  
-    size_t len = strlen(argv[1]) + 1;
+    size_t len = strlen(aafFilePath.c_str()) + 1;
     std::wstring widePath(len, L'\0');
     size_t convertedChars = 0;
-    mbstowcs_s(&convertedChars, &widePath[0], len, argv[1], _TRUNCATE);
+    mbstowcs_s(&convertedChars, &widePath[0], len, aafFilePath.c_str(), _TRUNCATE);
 
     // Открываем AAF файл
     IAAFFile* pFile = nullptr;
@@ -65,190 +105,88 @@ int main(int argc, char* argv[]) {
 
     std::map<std::string, std::string> mobIdToName;
 
-    // 1. Индексируем все мобы для ссылок
-    {
-        IEnumAAFMobs* pIter = nullptr;
-        if (SUCCEEDED(pHeader->GetMobs(nullptr, &pIter))) {
-            IAAFMob* pMob = nullptr;
-            while (SUCCEEDED(pIter->NextOne(&pMob))) {
-                aafMobID_t mobID;
-                if (FAILED(pMob->GetMobID(&mobID))) { 
-                    pMob->Release(); 
-                    continue; 
-                }
-                
-                aafWChar name[256] = {0};
-                pMob->GetName(name, sizeof(name)); // Игнорируем ошибки
-                
-                std::string mobIdStr = formatMobID(mobID);
-                std::string nameStr = wideToUtf8(name);
-                
-                if (nameStr.empty()) {
-                    IAAFCompositionMob* pComp = nullptr;
-                    IAAFMasterMob* pMaster = nullptr;
-                    IAAFSourceMob* pSource = nullptr;
-                    
-                    if (SUCCEEDED(pMob->QueryInterface(IID_IAAFCompositionMob, (void**)&pComp))) {
-                        nameStr = "[CompositionMob]";
-                        pComp->Release();
-                    } else if (SUCCEEDED(pMob->QueryInterface(IID_IAAFMasterMob, (void**)&pMaster))) {
-                        nameStr = "[MasterMob]";
-                        pMaster->Release();
-                    } else if (SUCCEEDED(pMob->QueryInterface(IID_IAAFSourceMob, (void**)&pSource))) {
-                        // Для SourceMob пытаемся извлечь имя файла из EssenceDescriptor
-                        IAAFEssenceDescriptor* pEssDesc = nullptr;
-                        if (SUCCEEDED(pSource->GetEssenceDescriptor(&pEssDesc))) {
-                            // Пытаемся получить имя файла через Locators
-                            aafUInt32 numLocators = 0;
-                            if (SUCCEEDED(pEssDesc->CountLocators(&numLocators)) && numLocators > 0) {
-                                out << "[DEBUG] Found " << numLocators << " locators for MobID " << mobIdStr << std::endl;
-                                IEnumAAFLocators* pLocatorEnum = nullptr;
-                                if (SUCCEEDED(pEssDesc->GetLocators(&pLocatorEnum))) {
-                                    IAAFLocator* pLocator = nullptr;
-                                    if (SUCCEEDED(pLocatorEnum->NextOne(&pLocator))) {
-                                        // Получаем размер буфера для пути
-                                        aafUInt32 pathBufSize = 0;
-                                        if (SUCCEEDED(pLocator->GetPathBufLen(&pathBufSize)) && pathBufSize > 0) {
-                                            std::vector<aafCharacter> pathBuffer(pathBufSize / sizeof(aafCharacter));
-                                            if (SUCCEEDED(pLocator->GetPath(pathBuffer.data(), pathBufSize))) {
-                                                std::string path = wideToUtf8(pathBuffer.data());
-                                                out << "[DEBUG] Got path from Locator: " << path << std::endl;
-                                                // Извлекаем имя файла из пути
-                                                size_t lastSlash = path.find_last_of("/\\");
-                                                if (lastSlash != std::string::npos) {
-                                                    nameStr = path.substr(lastSlash + 1);
-                                                } else {
-                                                    nameStr = path;
-                                                }
-                                                out << "[DEBUG] Extracted filename: " << nameStr << std::endl;
-                                            }
-                                        }
-                                        pLocator->Release();
-                                    }
-                                    pLocatorEnum->Release();
-                                }
-                            } else {
-                                out << "[DEBUG] No locators found for MobID " << mobIdStr << std::endl;
-                            }
-                            
-                            // Если не нашли через Locator, пытаемся получить через другие методы
-                            if (nameStr.empty()) {
-                                // Для embedded файлов генерируем имя на основе MobID
-                                nameStr = "embedded_audio_" + mobIdStr + ".wav";
-                            }
-                            pEssDesc->Release();
-                        }
-                        
-                        if (nameStr.empty()) {
-                            nameStr = "[SourceMob]";
-                        }
-                        pSource->Release();
-                    }
-                }
-                
-                mobIdToName[mobIdStr] = nameStr;
-                pMob->Release();
-            }
-            pIter->Release();
-        }
+    // Инициализируем новый парсер
+    out << "[*] Initializing AAF Proper Parser..." << std::endl;
+    AAFProperParser properParser(pHeader, out, logLevel);
+    
+    // Парсим AAF файл согласно спецификации
+    out << "[*] Parsing AAF file using Edit Protocol chain..." << std::endl;
+    auto startTime = std::chrono::high_resolution_clock::now();
+    
+    if (!properParser.parseAAFFile()) {
+        out << "ERROR: Failed to parse AAF file properly." << std::endl;
+        pHeader->Release();
+        pFile->Close(); 
+        pFile->Release();
+        return 1;
     }
-
-    out << "[*] Indexed " << mobIdToName.size() << " MobIDs" << std::endl;
-
-    // 2. Строим карту embedded файлов
-    std::set<std::string> embeddedMobIDs = buildEmbeddedFilesMap(pHeader, out);
     
-    out << "[DEBUG] About to build embedded file name mapping..." << std::endl;
-    // 3. Строим маппинг embedded файлов с правильными именами
-    std::map<std::string, std::string> embeddedNameMapping = buildEmbeddedFileNameMapping(pHeader, mobIdToName, out);
-    out << "[DEBUG] Built embedded name mapping with " << embeddedNameMapping.size() << " entries" << std::endl;
+    auto endTime = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+    properParser.getLogger().logPerformanceMetric("AAF Parsing", static_cast<double>(duration.count()));
     
-    // 3.5. Очищаем глобальную карту для сбора имён embedded файлов во время анализа клипов
-    g_embeddedFileNames.clear();
-    out << "[DEBUG] Cleared global embedded file names map for clip analysis" << std::endl;
+    // Получаем результаты парсинга
+    std::vector<AAFAudioTrackInfo> parsedTracks = properParser.getAudioTracks();
+    out << "[*] Found " << parsedTracks.size() << " audio tracks" << std::endl;
     
-    // 4. Обрабатываем композиции сначала для сбора информации о embedded файлах
-    aafSearchCrit_t searchCrit;
-    searchCrit.searchTag = kAAFByMobKind;
-    searchCrit.tags.mobKind = kAAFCompMob;
-
-    IEnumAAFMobs* pCompMobIter = nullptr;
-    if (SUCCEEDED(pHeader->GetMobs(&searchCrit, &pCompMobIter))) {
-        IAAFMob* pMob = nullptr;
-        int compMobCount = 0;
+    // Извлекаем все embedded аудио файлы
+    out << "[*] Extracting embedded audio files..." << std::endl;
+    startTime = std::chrono::high_resolution_clock::now();
+    
+    if (!properParser.extractAllEmbeddedAudio("extracted_media")) {
+        out << "WARNING: Some embedded audio files could not be extracted." << std::endl;
+    }
+    
+    endTime = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+    properParser.getLogger().logPerformanceMetric("Audio Extraction", static_cast<double>(duration.count()));
+    
+    // Преобразуем данные в формат ProjectData для CSV экспорта
+    projectData.projectName = "AAF_Import_Project";
+    projectData.sessionStartTimecode = 0.0;
+    
+    int totalClips = 0;
+    for (size_t trackIdx = 0; trackIdx < parsedTracks.size(); ++trackIdx) {
+        const AAFAudioTrackInfo& parsedTrack = parsedTracks[trackIdx];
         
-        while (SUCCEEDED(pCompMobIter->NextOne(&pMob))) {
-            aafWChar name[256] = {0};
-            pMob->GetName(name, sizeof(name));
-            projectData.projectName = wideToUtf8(name);
-            
-            if (projectData.projectName.empty()) {
-                projectData.projectName = "AAF_Import_Project";
-            }
-            
-            // Получаем начальный timecode сессии
-            aafPosition_t sessionStartTC = getCompositionStartTimecode(pMob);
-            projectData.sessionStartTimecode = (double)sessionStartTC / 25.0; // предполагаем 25fps
-            
-            out << "\n=== COMPOSITION #" << (++compMobCount) << ": " << projectData.projectName << " ===" << std::endl;
-            out << "Session Start Timecode: " << formatTimecode(sessionStartTC, {25, 1}) << std::endl;
-            
-            // Обрабатываем слоты композиции
-            aafNumSlots_t numSlots = 0;
-            if (SUCCEEDED(pMob->CountSlots(&numSlots))) {
-                for (aafUInt32 i = 0; i < numSlots; ++i) {
-                    IAAFMobSlot* pSlot = nullptr;
-                    if (SUCCEEDED(pMob->GetSlotAt(i, &pSlot))) {
-                    
-                        // Для текстового отчета
-                        processCompositionSlot(pSlot, out, i, mobIdToName, 
-                                             audioTrackCount, audioClipCount, audioFadeCount, audioEffectCount, sessionStartTC);
-                        
-                        // Для CSV экспорта
-                        if (isAudioTrack(pSlot)) {
-                            AudioTrackData trackData;
-                            trackData.trackIndex = i;
-                        
-                            aafWChar slotName[256] = {0};
-                            pSlot->GetName(slotName, sizeof(slotName));
-                            trackData.trackName = wideToUtf8(slotName);
-                            if (trackData.trackName.empty()) {
-                                trackData.trackName = "Audio Track " + std::to_string(i);
-                            }
-                            trackData.trackType = "Audio";
-                        
-                            processAudioTrackForExportWithHeader(pSlot, mobIdToName, sessionStartTC, trackData, pHeader, embeddedMobIDs, out);
-                        
-                            // Экспортируем ВСЕ аудио треки, даже пустые
-                            projectData.tracks.push_back(trackData);
-                        }
-                    
-                        pSlot->Release();
-                    }
-                }
-            }
-            pMob->Release();
-            break; // Обрабатываем только первую композицию
-        }
-        pCompMobIter->Release();
-    }
-    
-    out << "[DEBUG] After clip analysis, global embedded file names map has " << g_embeddedFileNames.size() << " entries" << std::endl;
-    
-    // 5. Теперь извлекаем все embedded файлы с правильными именами
-    std::map<std::string, std::string> embeddedFileMap = extractAllEmbeddedFiles(pHeader, mobIdToName, embeddedNameMapping, out);
-    
-    // 6. Обновляем mobIdToName картой извлеченных embedded файлов
-    for (const auto& embeddedFile : embeddedFileMap) {
-        const std::string& mobId = embeddedFile.first;
-        const std::string& extractedPath = embeddedFile.second;
+        AudioTrackData trackData;
+        trackData.trackIndex = static_cast<int>(trackIdx);
+        trackData.trackName = parsedTrack.trackName;
+        trackData.trackType = "Audio";
         
-        // Переопределяем путь для embedded файлов
-        mobIdToName[mobId] = extractedPath;
-        out << "[EMBEDDED_MAP] " << mobId << " -> " << extractedPath << std::endl;
+        for (const AAFAudioClipInfo& parsedClip : parsedTrack.clips) {
+            AudioClipData clipData;
+            clipData.fileName = parsedClip.originalFileName;
+            if (!parsedClip.extractedFilePath.empty()) {
+                clipData.fileName = parsedClip.extractedFilePath;
+            }
+            clipData.timelineStart = (double)parsedClip.timelineStart / parsedTrack.editRate.numerator * parsedTrack.editRate.denominator;
+            clipData.timelineEnd = (double)parsedClip.timelineEnd / parsedTrack.editRate.numerator * parsedTrack.editRate.denominator;
+            clipData.sourceStart = (double)parsedClip.sourceStart / parsedTrack.editRate.numerator * parsedTrack.editRate.denominator;
+            clipData.length = (double)parsedClip.duration / parsedTrack.editRate.numerator * parsedTrack.editRate.denominator;
+            clipData.mobID = parsedClip.mobID;
+            
+            // Фейды
+            if (parsedClip.hasFadeIn) {
+                clipData.fadeInLength = (double)parsedClip.fadeInLength / parsedTrack.editRate.numerator * parsedTrack.editRate.denominator;
+            }
+            if (parsedClip.hasFadeOut) {
+                clipData.fadeOutLength = (double)parsedClip.fadeOutLength / parsedTrack.editRate.numerator * parsedTrack.editRate.denominator;
+            }
+            
+            // Эффекты
+            clipData.effects = parsedClip.effects;
+            
+            trackData.clips.push_back(clipData);
+            totalClips++;
+        }
+        
+        projectData.tracks.push_back(trackData);
+        audioTrackCount++;
+        audioClipCount += static_cast<int>(trackData.clips.size());
     }
     
-    out << "[*] Updated mobIdToName with " << embeddedFileMap.size() << " embedded file paths" << std::endl;
+    out << "[*] Processed " << audioTrackCount << " tracks with " << totalClips << " clips total" << std::endl;
 
     // Вычисляем общую длительность проекта
     for (const auto& track : projectData.tracks) {
@@ -262,16 +200,26 @@ int main(int argc, char* argv[]) {
     // Экспортируем в CSV
     exportToCSV(projectData, "aaf_export.csv");
     
-    // Отладка EssenceData перед обработкой файлов
-    debugEssenceData(pHeader, out);
+    // Извлечение embedded аудио через новый API
+    out << "\n🎵 === EXTRACTING EMBEDDED AUDIO (NEW API) ===" << std::endl;
+    auto audioStartTime = std::chrono::high_resolution_clock::now();
     
-    // Обрабатываем аудиофайлы (копируем/извлекаем)
-    processAudioFiles(projectData, out);
+    bool extractionResult = properParser.extractAllEmbeddedAudio("extracted_media");
+    
+    auto audioEndTime = std::chrono::high_resolution_clock::now();
+    auto audioDuration = std::chrono::duration_cast<std::chrono::milliseconds>(audioEndTime - audioStartTime);
+    properParser.getLogger().logPerformanceMetric("Embedded Audio Extraction", static_cast<double>(audioDuration.count()));
+    
+    if (extractionResult) {
+        out << "✅ Embedded audio extraction completed successfully!" << std::endl;
+    } else {
+        out << "⚠️ No embedded audio found or extraction failed" << std::endl;
+    }
     
     // Статистика
     out << "\n📊 === AUDIO TRACKS SUMMARY ===" << std::endl;
     out << "Total audio tracks processed: " << audioTrackCount << std::endl;
-    out << "Total audio clips: " << audioClipCount << std::endl;  // Это OperationGroup (клипы)
+    out << "Total audio clips: " << totalClips << std::endl;
     out << "Total audio fades/crossfades: " << audioFadeCount << std::endl;
     out << "Total audio effects: " << audioEffectCount << std::endl;
     
@@ -279,7 +227,7 @@ int main(int argc, char* argv[]) {
     out << "Total tracks exported: " << projectData.tracks.size() << std::endl;
     int totalClipsExported = 0;
     for (const auto& track : projectData.tracks) {
-        totalClipsExported += track.clips.size();
+        totalClipsExported += static_cast<int>(track.clips.size());
     }
     out << "Total clips exported: " << totalClipsExported << std::endl;
     out << "Project length: " << std::fixed << std::setprecision(3) << projectData.totalLength << "s" << std::endl;

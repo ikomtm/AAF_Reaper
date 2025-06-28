@@ -7,13 +7,16 @@
     <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_utils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_parser.cpp">
+    <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_proper_parser.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\media_utils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\csv_export.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\debug_logger.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -24,13 +27,16 @@
     <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_utils.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_parser.h">
+    <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\aaf_proper_parser.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\media_utils.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\csv_export.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\KSN_PC\C++Projects\AAF_Reaper\aaf_reader\debug_logger.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

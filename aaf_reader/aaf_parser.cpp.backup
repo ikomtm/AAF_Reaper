@@ -1,6 +1,7 @@
 #include "aaf_parser.h"
 #include "aaf_utils.h"
 #include "media_utils.h"
+#include "aaf_essence_parser.h"
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -8,6 +9,9 @@
 
 // Глобальная карта для сбора имён embedded файлов во время анализа
 std::map<std::string, std::string> g_embeddedFileNames;
+
+// Глобальная карта для связи MasterMob MobID (из CSV) с именами файлов
+std::map<std::string, std::string> g_masterMobToFileName;
 
 // Функция для обработки компонента с позицией
 void processComponentWithPosition(IAAFComponent* pComp, std::ofstream& out, int compIndex, 
@@ -607,28 +611,36 @@ void extractClipsFromComponent(IAAFComponent* pComp, const std::map<std::string,
             out << "    [DEBUG] SourceClip MobID: " << refID << std::endl;
             
             // Сначала пытаемся сгенерировать правильное имя для Audio Clip
-            std::string clipFileName = generateAudioClipFileName(pClip, mobIdToName, out);
+            std::string clipFileName = generateAudioClipFileName(pClip, mobIdToName, pHeader, out);
             
             if (!clipFileName.empty()) {
                 // Используем сгенерированное имя
                 clipData.fileName = clipFileName;
                 out << "    [AUDIO_CLIP] Using generated clip file name: " << clipFileName << std::endl;
                 
-                // Проверяем, является ли файл embedded, и если да - добавляем в глобальную карту
-                EmbeddedFileInfo embeddedInfo = findEmbeddedFileInfo(pHeader, ref.sourceID, embeddedMobIDs, mobIdToName, out);
-                if (embeddedInfo.isEmbedded) {
-                    // Добавляем в глобальную карту: embedded MobID -> правильное имя файла
-                    g_embeddedFileNames[embeddedInfo.embeddedMobID] = clipFileName;
-                    out << "    [GLOBAL_MAP] Added to embedded file names: " << embeddedInfo.embeddedMobID << " -> " << clipFileName << std::endl;
+                // Проверяем, является ли файл embedded
+                std::string refMobIdStr = formatMobID(ref.sourceID);
+                if (embeddedMobIDs.find(refMobIdStr) != embeddedMobIDs.end()) {
+                    // Это embedded файл - глобальные карты уже заполнены в buildEmbeddedFileNameMapping
+                    out << "    [EMBEDDED] Found embedded file " << refMobIdStr << " for clip " << clipFileName << std::endl;
                 }
             } else {
                 // Fallback к старой логике
-                // Сначала проверяем, является ли файл embedded (прямо или через цепочку ссылок)
-                EmbeddedFileInfo embeddedInfo = findEmbeddedFileInfo(pHeader, ref.sourceID, embeddedMobIDs, mobIdToName, out);
-                if (embeddedInfo.isEmbedded) {
-                    clipData.fileName = embeddedInfo.filePath;
-                    clipData.mobID = embeddedInfo.embeddedMobID; // Используем правильный MOB ID embedded файла
-                    out << "    [EMBEDDED] Found and extracted embedded audio: " << embeddedInfo.filePath << " with MOB ID: " << embeddedInfo.embeddedMobID << std::endl;
+                // Сначала проверяем, является ли файл embedded
+                std::string refMobIdStr = formatMobID(ref.sourceID);
+                if (embeddedMobIDs.find(refMobIdStr) != embeddedMobIDs.end()) {
+                    // Это embedded файл - используем имя из глобальной карты
+                    auto embeddedIt = g_embeddedFileNames.find(refMobIdStr);
+                    if (embeddedIt != g_embeddedFileNames.end()) {
+                        clipData.fileName = embeddedIt->second;
+                        clipData.mobID = refMobIdStr;
+                        out << "    [EMBEDDED] Found embedded audio: " << embeddedIt->second << " with MOB ID: " << refMobIdStr << std::endl;
+                    } else {
+                        // Fallback имя для embedded файла
+                        clipData.fileName = "embedded_" + refMobIdStr + ".aif";
+                        clipData.mobID = refMobIdStr;
+                        out << "    [EMBEDDED] Using fallback name for embedded file: " << clipData.fileName << std::endl;
+                    }
                 } else if (mobIdToName.count(refID)) {
                     // Файл external - используем имя из mobIdToName
                     clipData.fileName = mobIdToName.at(refID);
@@ -732,28 +744,36 @@ AudioClipData createClipFromSourceClip(IAAFSourceClip* pClip, const std::map<std
         
         // Получаем имя файла
         // Сначала пытаемся сгенерировать правильное имя для Audio Clip
-        std::string clipFileName = generateAudioClipFileName(pClip, mobIdToName, out);
+        std::string clipFileName = generateAudioClipFileName(pClip, mobIdToName, pHeader, out);
         
         if (!clipFileName.empty()) {
             // Используем сгенерированное имя
             clipData.fileName = clipFileName;
             out << "    [AUDIO_CLIP] Using generated clip file name: " << clipFileName << std::endl;
             
-            // Проверяем, является ли файл embedded, и если да - добавляем в глобальную карту
-            EmbeddedFileInfo embeddedInfo = findEmbeddedFileInfo(pHeader, ref.sourceID, embeddedMobIDs, mobIdToName, out);
-            if (embeddedInfo.isEmbedded) {
-                // Добавляем в глобальную карту: embedded MobID -> правильное имя файла
-                g_embeddedFileNames[embeddedInfo.embeddedMobID] = clipFileName;
-                out << "    [GLOBAL_MAP] Added to embedded file names: " << embeddedInfo.embeddedMobID << " -> " << clipFileName << std::endl;
+            // Проверяем, является ли файл embedded
+            std::string refMobIdStr = formatMobID(ref.sourceID);
+            if (embeddedMobIDs.find(refMobIdStr) != embeddedMobIDs.end()) {
+                // Это embedded файл - глобальные карты уже заполнены в buildEmbeddedFileNameMapping
+                out << "    [EMBEDDED] Found embedded file " << refMobIdStr << " for clip " << clipFileName << std::endl;
             }
         } else {
             // Fallback к старой логике
-            // Сначала проверяем, является ли файл embedded (прямо или через цепочку ссылок)
-            EmbeddedFileInfo embeddedInfo = findEmbeddedFileInfo(pHeader, ref.sourceID, embeddedMobIDs, mobIdToName, out);
-            if (embeddedInfo.isEmbedded) {
-                clipData.fileName = embeddedInfo.filePath;
-                clipData.mobID = embeddedInfo.embeddedMobID; // Используем правильный MOB ID embedded файла
-                out << "    [EMBEDDED] Found and extracted embedded audio: " << embeddedInfo.filePath << " with MOB ID: " << embeddedInfo.embeddedMobID << std::endl;
+            // Сначала проверяем, является ли файл embedded
+            std::string refMobIdStr = formatMobID(ref.sourceID);
+            if (embeddedMobIDs.find(refMobIdStr) != embeddedMobIDs.end()) {
+                // Это embedded файл - используем имя из глобальной карты
+                auto embeddedIt = g_embeddedFileNames.find(refMobIdStr);
+                if (embeddedIt != g_embeddedFileNames.end()) {
+                    clipData.fileName = embeddedIt->second;
+                    clipData.mobID = refMobIdStr;
+                    out << "    [EMBEDDED] Found embedded audio: " << embeddedIt->second << " with MOB ID: " << refMobIdStr << std::endl;
+                } else {
+                    // Fallback имя для embedded файла
+                    clipData.fileName = "embedded_" + refMobIdStr + ".aif";
+                    clipData.mobID = refMobIdStr;
+                    out << "    [EMBEDDED] Using fallback name for embedded file: " << clipData.fileName << std::endl;
+                }
             } else if (mobIdToName.count(refID)) {
                 // Файл external - используем имя из mobIdToName
                 clipData.fileName = mobIdToName.at(refID);
@@ -824,7 +844,7 @@ void analyzeFadePatterns(const std::vector<IAAFComponent*>& components,
 
 // Генерирует правильное имя файла для Audio Clip на основе Audio File имени и Clip MobID
 std::string generateAudioClipFileName(IAAFSourceClip* pClip, const std::map<std::string, std::string>& mobIdToName,
-                                     std::ofstream& out) {
+                                     IAAFHeader* pHeader, std::ofstream& out) {
     if (!pClip) return "";
     
     // Получаем MobID самого клипа (Audio Clip)
@@ -864,6 +884,17 @@ std::string generateAudioClipFileName(IAAFSourceClip* pClip, const std::map<std:
             audioFileName = audioFileName.substr(0, dotPos);
         }
         out << "    [AUDIO_CLIP] Audio File Name: " << audioFileName << ", Extension: " << originalExtension << std::endl;
+    } else {
+        // Если не нашли в mobIdToName, используем fallback naming
+        out << "    [AUDIO_CLIP] Not found in mobIdToName, using fallback naming" << std::endl;
+        
+        // Создаем временное имя на основе MobID
+        std::ostringstream nameOss;
+        nameOss << "MasterMob_" << audioFileMobId;
+        audioFileName = nameOss.str();
+        originalExtension = ".aif"; // По умолчанию для embedded
+        
+        out << "    [AUDIO_CLIP] Generated fallback filename: " << audioFileName << originalExtension << std::endl;
     }
     
     pComponent->Release();

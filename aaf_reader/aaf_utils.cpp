@@ -1,8 +1,11 @@
 #include "aaf_utils.h"
+#include <AAFDataDefs.h>
 #include <locale>
 #include <codecvt>
 #include <cstdio>
 #include <iostream>
+#include <vector>
+#include <cstring>
 
 std::string wideToUtf8(const std::wstring& wstr) {
     std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> conv;
@@ -140,4 +143,120 @@ std::string getDataDefName(IAAFDataDef* pDataDef) {
     }
     
     return "Other";
+}
+
+std::string getFileNameFromEssenceDescriptor(IAAFEssenceDescriptor* pEssenceDesc) {
+    if (!pEssenceDesc) return "";
+    
+    std::string fileName = "";
+    
+    // Попытаемся получить имя через Locators
+    aafUInt32 numLocators = 0;
+    if (SUCCEEDED(pEssenceDesc->CountLocators(&numLocators)) && numLocators > 0) {
+        IEnumAAFLocators* pLocatorEnum = nullptr;
+        if (SUCCEEDED(pEssenceDesc->GetLocators(&pLocatorEnum))) {
+            IAAFLocator* pLocator = nullptr;
+            if (SUCCEEDED(pLocatorEnum->NextOne(&pLocator))) {
+                aafUInt32 pathBufSize = 0;
+                if (SUCCEEDED(pLocator->GetPathBufLen(&pathBufSize)) && pathBufSize > 0) {
+                    std::vector<aafCharacter> pathBuffer(pathBufSize / sizeof(aafCharacter));
+                    if (SUCCEEDED(pLocator->GetPath(pathBuffer.data(), pathBufSize))) {
+                        std::wstring path(pathBuffer.data());
+                        std::string pathStr = wideToUtf8(path);
+                        // Извлекаем имя файла из пути
+                        size_t lastSlash = pathStr.find_last_of("/\\");
+                        if (lastSlash != std::string::npos) {
+                            fileName = pathStr.substr(lastSlash + 1);
+                        } else {
+                            fileName = pathStr;
+                        }
+                    }
+                }
+                pLocator->Release();
+            }
+            pLocatorEnum->Release();
+        }
+    }
+    
+    return fileName;
+}
+
+bool isSameMobID(const aafMobID_t& a, const aafMobID_t& b) {
+    return memcmp(&a, &b, sizeof(aafMobID_t)) == 0;
+}
+
+// Recursively check components (incl. EssenceGroup)
+bool componentRefersToEssenceMob(IAAFComponent* pComponent, const aafMobID_t& essenceMobID) {
+    IAAFSourceClip* pSrcClip = nullptr;
+    if (SUCCEEDED(pComponent->QueryInterface(IID_IAAFSourceClip, (void**)&pSrcClip))) {
+        aafSourceRef_t ref;
+        if (SUCCEEDED(pSrcClip->GetSourceReference(&ref))) {
+            pSrcClip->Release();
+            return isSameMobID(ref.sourceID, essenceMobID);
+        }
+        pSrcClip->Release();
+    }
+    IAAFSequence* pSeq = nullptr;
+    if (SUCCEEDED(pComponent->QueryInterface(IID_IAAFSequence, (void**)&pSeq))) {
+        IEnumAAFComponents* pEnum = nullptr;
+        if (SUCCEEDED(pSeq->GetComponents(&pEnum))) {
+            IAAFComponent* pSubComp = nullptr;
+            while (pEnum->NextOne(&pSubComp) == AAFRESULT_SUCCESS) {
+                if (componentRefersToEssenceMob(pSubComp, essenceMobID)) {
+                    pSubComp->Release();
+                    pEnum->Release();
+                    pSeq->Release();
+                    return true;
+                }
+                pSubComp->Release();
+            }
+            pEnum->Release();
+        }
+        pSeq->Release();
+    }
+    return false;
+}
+
+IAAFMob* findMasterMobFromEssenceData(IAAFHeader* pHeader, IAAFEssenceData* pEssenceData) {
+    aafMobID_t essenceMobID;
+    IAAFMob* pMob = nullptr;
+    if (FAILED(pEssenceData->QueryInterface(IID_IAAFMob, (void**)&pMob))) return nullptr;
+    pMob->GetMobID(&essenceMobID);
+    pMob->Release();
+
+    IEnumAAFMobs* pEnum = nullptr;
+    aafSearchCrit_t crit;
+    crit.searchTag = kAAFByMobKind;
+    crit.tags.mobKind = kAAFMasterMob;
+    if (FAILED(pHeader->GetMobs(&crit, &pEnum))) return nullptr;
+
+    while (pEnum->NextOne(&pMob) == AAFRESULT_SUCCESS) {
+        IEnumAAFMobSlots* pSlotEnum = nullptr;
+        if (SUCCEEDED(pMob->GetSlots(&pSlotEnum))) {
+            IAAFMobSlot* pSlot = nullptr;
+            while (pSlotEnum->NextOne(&pSlot) == AAFRESULT_SUCCESS) {
+                IAAFSegment* pSegment = nullptr;
+                if (SUCCEEDED(pSlot->GetSegment(&pSegment))) {
+                    IAAFComponent* pComponent = nullptr;
+                    if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFComponent, (void**)&pComponent))) {
+                        if (componentRefersToEssenceMob(pComponent, essenceMobID)) {
+                            pComponent->Release();
+                            pSegment->Release();
+                            pSlot->Release();
+                            pSlotEnum->Release();
+                            pEnum->Release();
+                            return pMob;
+                        }
+                        pComponent->Release();
+                    }
+                    pSegment->Release();
+                }
+                pSlot->Release();
+            }
+            pSlotEnum->Release();
+        }
+        pMob->Release();
+    }
+    pEnum->Release();
+    return nullptr;
 }

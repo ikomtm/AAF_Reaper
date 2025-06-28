@@ -1,6 +1,5 @@
 #include "media_utils.h"
 #include "aaf_utils.h"
-#include "aaf_parser.h"
 #include <AAF.h>
 #include <AAFResult.h>
 #include <AAFTypes.h>
@@ -10,6 +9,11 @@
 #include <fstream>
 #include <vector>
 #include <set>
+#include <sstream>
+
+// Глобальные карты для сбора имён embedded файлов во время анализа
+std::map<std::string, std::string> g_embeddedFileNames; // MobID -> правильное имя файла
+std::map<std::string, std::string> g_masterMobToFileName; // MasterMob MobID (из CSV) -> имена файлов
 
 void createExtractedMediaFolder() {
     try {
@@ -36,6 +40,48 @@ void extractEmbeddedAudio(IAAFEssenceData* pEssenceData, const std::string& outp
             return;
         }
         
+        // Получаем информацию о свойствах аудио из FileMob
+        aafMobID_t essenceMobID;
+        if (SUCCEEDED(pEssenceData->GetFileMobID(&essenceMobID))) {
+            out << "  📊 AUDIO PROPERTIES:" << std::endl;
+            out << "    • Data Size: " << dataSize << " bytes" << std::endl;
+            
+            // Попытаемся получить дополнительную информацию через FileMob
+            IAAFMob* pFileMob = nullptr;
+            if (SUCCEEDED(pEssenceData->QueryInterface(IID_IAAFMob, (void**)&pFileMob))) {
+                IAAFSourceMob* pSourceMob = nullptr;
+                if (SUCCEEDED(pFileMob->QueryInterface(IID_IAAFSourceMob, (void**)&pSourceMob))) {
+                    IAAFEssenceDescriptor* pEssenceDesc = nullptr;
+                    if (SUCCEEDED(pSourceMob->GetEssenceDescriptor(&pEssenceDesc))) {
+                        // Пытаемся получить SoundDescriptor для аудио информации
+                        IAAFSoundDescriptor* pSoundDesc = nullptr;
+                        if (SUCCEEDED(pEssenceDesc->QueryInterface(IID_IAAFSoundDescriptor, (void**)&pSoundDesc))) {
+                            aafRational_t sampleRate;
+                            if (SUCCEEDED(pSoundDesc->GetAudioSamplingRate(&sampleRate))) {
+                                double rate = (double)sampleRate.numerator / (double)sampleRate.denominator;
+                                out << "    • Sample Rate: " << rate << " Hz" << std::endl;
+                            }
+                            
+                            aafUInt32 channels = 0;
+                            if (SUCCEEDED(pSoundDesc->GetChannelCount(&channels))) {
+                                out << "    • Channels: " << channels << std::endl;
+                            }
+                            
+                            aafUInt32 quantizationBits = 0;
+                            if (SUCCEEDED(pSoundDesc->GetQuantizationBits(&quantizationBits))) {
+                                out << "    • Bit Depth: " << quantizationBits << " bits" << std::endl;
+                            }
+                            
+                            pSoundDesc->Release();
+                        }
+                        pEssenceDesc->Release();
+                    }
+                    pSourceMob->Release();
+                }
+                pFileMob->Release();
+            }
+        }
+        
         // Создаем буфер для чтения данных
         std::vector<aafUInt8> buffer(static_cast<size_t>(dataSize));
         aafUInt32 bytesRead = 0;
@@ -60,6 +106,8 @@ void extractEmbeddedAudio(IAAFEssenceData* pEssenceData, const std::string& outp
         
         outFile.write(reinterpret_cast<const char*>(buffer.data()), bytesRead);
         outFile.close();
+        
+        out << "  ✅ Extracted: " << outputPath << std::endl;
         
     } catch (const std::exception& e) {
         out << "Error extracting embedded audio: " << e.what() << std::endl;
@@ -407,342 +455,137 @@ std::set<std::string> buildEmbeddedFilesMap(IAAFHeader* pHeader, std::ofstream& 
     return embeddedMobIDs;
 }
 
-// Функция для поиска embedded файлов через цепочку ссылок (SourceClip -> MasterMob -> FileMob)
-std::string findEmbeddedFileRecursive(IAAFHeader* pHeader, const aafMobID_t& mobID, 
-                                     const std::set<std::string>& embeddedMobIDs,
-                                     const std::map<std::string, std::string>& mobIdToName, 
-                                     std::ofstream& out) {
-    if (!pHeader) return "";
-    
-    std::string mobIdStr = formatMobID(mobID);
-    out << "  [DEBUG] Checking for embedded file: " << mobIdStr << std::endl;
-    
-    // Сначала проверяем, не является ли сам MobID embedded
-    if (embeddedMobIDs.find(mobIdStr) != embeddedMobIDs.end()) {
-        out << "  [EMBEDDED] Direct embedded file found: " << mobIdStr << std::endl;
-        // Используем имя файла из mobIdToName (которое уже содержит пути к извлеченным файлам)
-        if (mobIdToName.count(mobIdStr)) {
-            std::string filePath = mobIdToName.at(mobIdStr);
-            out << "  [EMBEDDED] Using extracted file: " << filePath << std::endl;
-            return filePath;
-        }
-        return "";
-    }
-    
-    // Если нет, ищем MasterMob/CompositionMob с этим ID
-    IAAFMob* pMob = nullptr;
-    if (SUCCEEDED(pHeader->LookupMob(mobID, &pMob))) {
-        out << "  [DEBUG] Found Mob with ID: " << mobIdStr << std::endl;
-        
-        // Получаем слоты этого Mob
-        IEnumAAFMobSlots* pSlotEnum = nullptr;
-        if (SUCCEEDED(pMob->GetSlots(&pSlotEnum))) {
-            IAAFMobSlot* pSlot = nullptr;
-            while (SUCCEEDED(pSlotEnum->NextOne(&pSlot))) {
-                IAAFSegment* pSegment = nullptr;
-                if (SUCCEEDED(pSlot->GetSegment(&pSegment))) {
-                    // Проверяем, является ли сегмент SourceClip
-                    IAAFSourceClip* pSourceClip = nullptr;
-                    if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFSourceClip, (void**)&pSourceClip))) {
-                        aafSourceRef_t sourceRef;
-                        if (SUCCEEDED(pSourceClip->GetSourceReference(&sourceRef))) {
-                            std::string refMobIdStr = formatMobID(sourceRef.sourceID);
-                            out << "  [DEBUG] Found SourceClip reference: " << refMobIdStr << std::endl;
-                            
-                            // Проверяем, является ли этот SourceRef embedded
-                            if (embeddedMobIDs.find(refMobIdStr) != embeddedMobIDs.end()) {
-                                out << "  [EMBEDDED] Found embedded file via MasterMob: " << refMobIdStr << std::endl;
-                                // Используем имя файла из mobIdToName (которое уже содержит пути к извлеченным файлам)
-                                if (mobIdToName.count(refMobIdStr)) {
-                                    std::string filePath = mobIdToName.at(refMobIdStr);
-                                    out << "  [EMBEDDED] Using extracted file: " << filePath << std::endl;
-                                    pSourceClip->Release();
-                                    pSegment->Release();
-                                    pSlot->Release();
-                                    pSlotEnum->Release();
-                                    pMob->Release();
-                                    return filePath;
-                                }
-                            }
-                        }
-                        pSourceClip->Release();
-                    }
-                    pSegment->Release();
-                }
-                pSlot->Release();
-            }
-            pSlotEnum->Release();
-        }
-        pMob->Release();
-    } else {
-        out << "  [DEBUG] Mob not found: " << mobIdStr << std::endl;
-    }
-    
-    return "";
-}
 
-// Новая функция для получения полной информации об embedded файле
-EmbeddedFileInfo findEmbeddedFileInfo(IAAFHeader* pHeader, const aafMobID_t& mobID, 
-                                     const std::set<std::string>& embeddedMobIDs,
-                                     const std::map<std::string, std::string>& mobIdToName, 
-                                     std::ofstream& out) {
-    if (!pHeader) return EmbeddedFileInfo();
-    
-    std::string mobIdStr = formatMobID(mobID);
-    out << "  [DEBUG] Checking for embedded file info: " << mobIdStr << std::endl;
-    
-    // Сначала проверяем, не является ли сам MobID embedded
-    if (embeddedMobIDs.find(mobIdStr) != embeddedMobIDs.end()) {
-        out << "  [EMBEDDED] Direct embedded file found: " << mobIdStr << std::endl;
-        // Используем имя файла из mobIdToName (которое уже содержит пути к извлеченным файлам)
-        if (mobIdToName.count(mobIdStr)) {
-            std::string filePath = mobIdToName.at(mobIdStr);
-            out << "  [EMBEDDED] Using extracted file: " << filePath << " with MOB ID: " << mobIdStr << std::endl;
-            return EmbeddedFileInfo(filePath, mobIdStr);
-        }
-        return EmbeddedFileInfo();
-    }
-    
-    // Если нет, ищем MasterMob/CompositionMob с этим ID
-    IAAFMob* pMob = nullptr;
-    if (SUCCEEDED(pHeader->LookupMob(mobID, &pMob))) {
-        out << "  [DEBUG] Found Mob with ID: " << mobIdStr << std::endl;
-        
-        // Получаем слоты этого Mob
-        IEnumAAFMobSlots* pSlotEnum = nullptr;
-        if (SUCCEEDED(pMob->GetSlots(&pSlotEnum))) {
-            IAAFMobSlot* pSlot = nullptr;
-            while (SUCCEEDED(pSlotEnum->NextOne(&pSlot))) {
-                IAAFSegment* pSegment = nullptr;
-                if (SUCCEEDED(pSlot->GetSegment(&pSegment))) {
-                    // Проверяем, является ли сегмент SourceClip
-                    IAAFSourceClip* pSourceClip = nullptr;
-                    if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFSourceClip, (void**)&pSourceClip))) {
-                        aafSourceRef_t sourceRef;
-                        if (SUCCEEDED(pSourceClip->GetSourceReference(&sourceRef))) {
-                            std::string refMobIdStr = formatMobID(sourceRef.sourceID);
-                            out << "  [DEBUG] Found SourceClip reference: " << refMobIdStr << std::endl;
-                            
-                            // Проверяем, является ли этот SourceRef embedded
-                            if (embeddedMobIDs.find(refMobIdStr) != embeddedMobIDs.end()) {
-                                out << "  [EMBEDDED] Found embedded file via MasterMob: " << refMobIdStr << std::endl;
-                                // Используем имя файла из mobIdToName и ПРАВИЛЬНЫЙ MOB ID embedded файла
-                                if (mobIdToName.count(refMobIdStr)) {
-                                    std::string filePath = mobIdToName.at(refMobIdStr);
-                                    out << "  [EMBEDDED] Using extracted file: " << filePath << " with MOB ID: " << refMobIdStr << std::endl;
-                                    pSourceClip->Release();
-                                    pSegment->Release();
-                                    pSlot->Release();
-                                    pSlotEnum->Release();
-                                    pMob->Release();
-                                    return EmbeddedFileInfo(filePath, refMobIdStr);
-                                }
-                            }
-                        }
-                        pSourceClip->Release();
-                    }
-                    pSegment->Release();
-                }
-                pSlot->Release();
-            }
-            pSlotEnum->Release();
-        }
-        pMob->Release();
-    } 
-    
-    return EmbeddedFileInfo(); // Не найден embedded файл
-}
+
+
 
 std::map<std::string, std::string> buildEmbeddedFileNameMapping(IAAFHeader* pHeader, 
                                                                const std::map<std::string, std::string>& mobIdToName, 
                                                                std::ofstream& out) {
     std::map<std::string, std::string> embeddedMapping;
-    out << "\n🔗 === BUILDING EMBEDDED FILE NAME MAPPING ===" << std::endl;
+    out << "\n🔗 === BUILDING EMBEDDED FILE NAME MAPPING (ROBUST) ===" << std::endl;
     
-    // Сначала собираем все embedded MobID
-    std::set<std::string> embeddedMobIDs;
+    // Используем robust mapping для связи EssenceData с MasterMob
     IEnumAAFEssenceData* pEssenceEnum = nullptr;
     if (SUCCEEDED(pHeader->EnumEssenceData(&pEssenceEnum))) {
         IAAFEssenceData* pEssenceData = nullptr;
+        int essenceCount = 0;
+        
         while (SUCCEEDED(pEssenceEnum->NextOne(&pEssenceData))) {
+            essenceCount++;
             aafMobID_t essenceMobID;
             if (SUCCEEDED(pEssenceData->GetFileMobID(&essenceMobID))) {
-                std::string mobIdStr = formatMobID(essenceMobID);
-                embeddedMobIDs.insert(mobIdStr);
+                std::string essenceMobIdStr = formatMobID(essenceMobID);
+                out << "[ESSENCE " << essenceCount << "] Processing EssenceData with MobID: " << essenceMobIdStr << std::endl;
+                
+                // Используем robust mapping для поиска соответствующего MasterMob
+                IAAFMob* pMasterMob = findMasterMobFromEssenceData(pHeader, pEssenceData);
+                if (pMasterMob) {
+                    out << "[DEBUG] Found MasterMob for EssenceData " << essenceMobIdStr << std::endl;
+                    aafMobID_t masterMobID;
+                    if (SUCCEEDED(pMasterMob->GetMobID(&masterMobID))) {
+                        std::string masterMobIdStr = formatMobID(masterMobID);
+                        std::string finalFileName;
+                        
+                        // ПРИОРИТЕТ 1: Попытаемся получить имя файла из EssenceDescriptor (Locator)
+                        IAAFSourceMob* pSourceMob = nullptr;
+                        if (SUCCEEDED(pMasterMob->QueryInterface(IID_IAAFSourceMob, (void**)&pSourceMob))) {
+                            IAAFEssenceDescriptor* pEssenceDesc = nullptr;
+                            if (SUCCEEDED(pSourceMob->GetEssenceDescriptor(&pEssenceDesc))) {
+                                std::string locatorFileName = getFileNameFromEssenceDescriptor(pEssenceDesc);
+                                if (!locatorFileName.empty() && locatorFileName != "embedded_essence.dat") {
+                                    finalFileName = locatorFileName;
+                                    out << "[LOCATOR] Found file name from EssenceDescriptor: " << locatorFileName << std::endl;
+                                }
+                                pEssenceDesc->Release();
+                            }
+                            
+                            // ПРИОРИТЕТ 1.5: Если EssenceDescriptor не дал результата, пробуем имя SourceMob
+                            if (finalFileName.empty()) {
+                                IAAFMob* pMobInterface = nullptr;
+                                if (SUCCEEDED(pSourceMob->QueryInterface(IID_IAAFMob, (void**)&pMobInterface))) {
+                                    aafCharacter mobNameBuf[256] = {0};
+                                    if (SUCCEEDED(pMobInterface->GetName(mobNameBuf, 256))) {
+                                        std::string mobName;
+                                        for (int i = 0; i < 256 && mobNameBuf[i] != 0; i++) {
+                                            mobName += (char)mobNameBuf[i];
+                                        }
+                                        if (!mobName.empty() && mobName != "[SourceMob]") {
+                                            // Добавляем расширение если его нет
+                                            if (mobName.find('.') == std::string::npos) {
+                                                mobName += ".wav"; // По умолчанию для аудио
+                                            }
+                                            finalFileName = mobName;
+                                            out << "[SOURCE_MOB] Found file name from SourceMob name: " << mobName << std::endl;
+                                        }
+                                    }
+                                    pMobInterface->Release();
+                                }
+                            }
+                            
+                            pSourceMob->Release();
+                        }
+                        
+                        // ПРИОРИТЕТ 2: Если предыдущие методы не дали результата, используем имя MasterMob из карты
+                        if (finalFileName.empty()) {
+                            auto it = mobIdToName.find(masterMobIdStr);
+                            if (it != mobIdToName.end() && !it->second.empty() && it->second != "[MasterMob]") {
+                                finalFileName = it->second;
+                                out << "[FALLBACK] Using MasterMob name: " << finalFileName << std::endl;
+                            }
+                        }
+                        
+                        // Если получили имя файла, заполняем карты
+                        if (!finalFileName.empty()) {
+                            embeddedMapping[essenceMobIdStr] = finalFileName;
+                            
+                            // Также заполняем глобальные карты для использования при экстракции
+                            g_embeddedFileNames[essenceMobIdStr] = finalFileName;
+                            g_masterMobToFileName[masterMobIdStr] = finalFileName;
+                            
+                            out << "[ROBUST MAPPING] EssenceData " << essenceMobIdStr 
+                                << " -> MasterMob " << masterMobIdStr 
+                                << " -> File: " << finalFileName << std::endl;
+                        } else {
+                            out << "[WARNING] No readable name found for MasterMob " << masterMobIdStr << std::endl;
+                            
+                            // FALLBACK: Генерируем уникальное имя на основе MobID
+                            std::ostringstream fallbackName;
+                            fallbackName << "embedded_audio_" << essenceMobIdStr.substr(0, 8) << ".wav";
+                            finalFileName = fallbackName.str();
+                            
+                            embeddedMapping[essenceMobIdStr] = finalFileName;
+                            g_embeddedFileNames[essenceMobIdStr] = finalFileName;
+                            g_masterMobToFileName[masterMobIdStr] = finalFileName;
+                            
+                            out << "[FALLBACK] Generated fallback name: " << finalFileName << std::endl;
+                        }
+                    }
+                    pMasterMob->Release();
+                } else {
+                    out << "[DEBUG] No MasterMob found for EssenceData " << essenceMobIdStr << std::endl;
+                    
+                    // FALLBACK: Даже без MasterMob создаем имя для embedded файла
+                    std::ostringstream fallbackName;
+                    fallbackName << "embedded_audio_" << essenceMobIdStr.substr(0, 8) << ".wav";
+                    std::string finalFileName = fallbackName.str();
+                    
+                    embeddedMapping[essenceMobIdStr] = finalFileName;
+                    g_embeddedFileNames[essenceMobIdStr] = finalFileName;
+                    
+                    out << "[FALLBACK] Generated fallback name without MasterMob: " << finalFileName << std::endl;
+                }
             }
             pEssenceData->Release();
         }
         pEssenceEnum->Release();
     }
     
-    out << "[*] Found " << embeddedMobIDs.size() << " embedded files" << std::endl;
-    
-    // Упрощенный подход: ищем все MasterMob, которые ссылаются на embedded SourceMob
-    IEnumAAFMobs* pMobEnum = nullptr;
-    if (SUCCEEDED(pHeader->GetMobs(nullptr, &pMobEnum))) {
-        IAAFMob* pMob = nullptr;
-        while (SUCCEEDED(pMobEnum->NextOne(&pMob))) {
-            IAAFMasterMob* pMasterMob = nullptr;
-            if (SUCCEEDED(pMob->QueryInterface(IID_IAAFMasterMob, (void**)&pMasterMob))) {
-                aafMobID_t masterMobID;
-                if (SUCCEEDED(pMob->GetMobID(&masterMobID))) {
-                    std::string masterMobIdStr = formatMobID(masterMobID);
-                    
-                    // Получаем имя MasterMob (это будет читаемое имя файла)
-                    std::string readableName;
-                    auto it = mobIdToName.find(masterMobIdStr);
-                    if (it != mobIdToName.end()) {
-                        readableName = it->second;
-                        out << "[DEBUG] Processing MasterMob " << masterMobIdStr << " with name: " << readableName << std::endl;
-                    }
-                    
-                    // Ищем слоты MasterMob
-                    aafNumSlots_t numSlots = 0;
-                    if (SUCCEEDED(pMob->CountSlots(&numSlots))) {
-                        for (aafUInt32 i = 0; i < numSlots; ++i) {
-                            IAAFMobSlot* pSlot = nullptr;
-                            if (SUCCEEDED(pMob->GetSlotAt(i, &pSlot))) {
-                                IAAFSegment* pSegment = nullptr;
-                                if (SUCCEEDED(pSlot->GetSegment(&pSegment))) {
-                                    IAAFSourceClip* pSourceClip = nullptr;
-                                    if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFSourceClip, (void**)&pSourceClip))) {
-                                        aafSourceRef_t sourceRef;
-                                        if (SUCCEEDED(pSourceClip->GetSourceReference(&sourceRef))) {
-                                            std::string sourceMobIdStr = formatMobID(sourceRef.sourceID);
-                                            out << "[DEBUG] MasterMob slot " << i << " references SourceMob: " << sourceMobIdStr << std::endl;
-                                            
-                                            // Проверяем, является ли этот SourceMob embedded
-                                            if (embeddedMobIDs.find(sourceMobIdStr) != embeddedMobIDs.end()) {
-                                                if (!readableName.empty() && readableName != "[MasterMob]") {
-                                                    embeddedMapping[sourceMobIdStr] = readableName;
-                                                    out << "[MAPPING] " << sourceMobIdStr << " -> " << readableName << std::endl;
-                                                }
-                                            }
-                                        }
-                                        pSourceClip->Release();
-                                    }
-                                    pSegment->Release();
-                                }
-                                pSlot->Release();
-                            }
-                        }
-                    }
-                }
-                pMasterMob->Release();
-            }
-            pMob->Release();
-        }
-        pMobEnum->Release();
-    }
-    
-    out << "[*] Built " << embeddedMapping.size() << " embedded file name mappings" << std::endl;
+    out << "[*] Built " << embeddedMapping.size() << " robust embedded file name mappings" << std::endl;
     return embeddedMapping;
 }
 
-// Вспомогательная функция для рекурсивного обхода сегментов
-void traverseSegmentForEmbeddedMapping(IAAFSegment* pSegment, 
-                                     IAAFHeader* pHeader,
-                                     const std::set<std::string>& embeddedMobIDs,
-                                     const std::map<std::string, std::string>& mobIdToName,
-                                     std::map<std::string, std::string>& embeddedMapping,
-                                     std::ofstream& out) {
-    if (!pSegment) return;
-    
-    // Проверяем, является ли сегмент SourceClip
-    IAAFSourceClip* pSourceClip = nullptr;
-    if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFSourceClip, (void**)&pSourceClip))) {
-        aafSourceRef_t sourceRef;
-        if (SUCCEEDED(pSourceClip->GetSourceReference(&sourceRef))) {
-            std::string masterMobIdStr = formatMobID(sourceRef.sourceID);
-            out << "[DEBUG] Found SourceClip referencing MasterMob: " << masterMobIdStr << std::endl;
-            
-            // Получаем имя для этого MasterMob
-            std::string readableName;
-            auto it = mobIdToName.find(masterMobIdStr);
-            if (it != mobIdToName.end()) {
-                readableName = it->second;
-                out << "[DEBUG] MasterMob " << masterMobIdStr << " has name: " << readableName << std::endl;
-            }
-            
-            // Теперь ищем MasterMob и смотрим, на какие SourceMob он ссылается
-            IEnumAAFMobs* pMobEnum = nullptr;
-            if (SUCCEEDED(pHeader->GetMobs(nullptr, &pMobEnum))) {
-                IAAFMob* pMob = nullptr;
-                while (SUCCEEDED(pMobEnum->NextOne(&pMob))) {
-                    aafMobID_t mobID;
-                    if (SUCCEEDED(pMob->GetMobID(&mobID))) {
-                        std::string mobIdStr = formatMobID(mobID);
-                        
-                        // Если это нужный MasterMob
-                        if (mobIdStr == masterMobIdStr) {
-                            IAAFMasterMob* pMasterMob = nullptr;
-                            if (SUCCEEDED(pMob->QueryInterface(IID_IAAFMasterMob, (void**)&pMasterMob))) {
-                                out << "[DEBUG] Found MasterMob: " << masterMobIdStr << std::endl;
-                                
-                                // Ищем слоты MasterMob
-                                aafNumSlots_t numSlots = 0;
-                                if (SUCCEEDED(pMob->CountSlots(&numSlots))) {
-                                    for (aafUInt32 j = 0; j < numSlots; ++j) {
-                                        IAAFMobSlot* pMasterSlot = nullptr;
-                                        if (SUCCEEDED(pMob->GetSlotAt(j, &pMasterSlot))) {
-                                            IAAFSegment* pMasterSegment = nullptr;
-                                            if (SUCCEEDED(pMasterSlot->GetSegment(&pMasterSegment))) {
-                                                IAAFSourceClip* pMasterSourceClip = nullptr;
-                                                if (SUCCEEDED(pMasterSegment->QueryInterface(IID_IAAFSourceClip, (void**)&pMasterSourceClip))) {
-                                                    aafSourceRef_t masterSourceRef;
-                                                    if (SUCCEEDED(pMasterSourceClip->GetSourceReference(&masterSourceRef))) {
-                                                        std::string sourceMobIdStr = formatMobID(masterSourceRef.sourceID);
-                                                        out << "[DEBUG] MasterMob slot " << j << " references SourceMob: " << sourceMobIdStr << std::endl;
-                                                        
-                                                        // Проверяем, является ли этот SourceMob embedded
-                                                        if (embeddedMobIDs.find(sourceMobIdStr) != embeddedMobIDs.end()) {
-                                                            if (!readableName.empty() && readableName != "[MasterMob]") {
-                                                                embeddedMapping[sourceMobIdStr] = readableName;
-                                                                out << "[MAPPING] " << sourceMobIdStr << " -> " << readableName << std::endl;
-                                                            }
-                                                        }
-                                                    }
-                                                    pMasterSourceClip->Release();
-                                                }
-                                                pMasterSegment->Release();
-                                            }
-                                            pMasterSlot->Release();
-                                        }
-                                    }
-                                }
-                                pMasterMob->Release();
-                            }
-                            break; // Нашли нужный MasterMob
-                        }
-                    }
-                    pMob->Release();
-                }
-                pMobEnum->Release();
-            }
-        }
-        pSourceClip->Release();
-    }
-    
-    // Также проверяем, является ли сегмент Sequence (может содержать вложенные сегменты)
-    IAAFSequence* pSequence = nullptr;
-    if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFSequence, (void**)&pSequence))) {
-        out << "[DEBUG] Found Sequence, traversing components..." << std::endl;
-        IEnumAAFComponents* pCompEnum = nullptr;
-        if (SUCCEEDED(pSequence->GetComponents(&pCompEnum))) {
-            IAAFComponent* pComponent = nullptr;
-            while (SUCCEEDED(pCompEnum->NextOne(&pComponent))) {
-                IAAFSegment* pComponentSegment = nullptr;
-                if (SUCCEEDED(pComponent->QueryInterface(IID_IAAFSegment, (void**)&pComponentSegment))) {
-                    traverseSegmentForEmbeddedMapping(pComponentSegment, pHeader, embeddedMobIDs, mobIdToName, embeddedMapping, out);
-                    pComponentSegment->Release();
-                }
-                pComponent->Release();
-            }
-            pCompEnum->Release();
-        }
-        pSequence->Release();
-    }
-}
+
 
 std::map<std::string, std::string> extractAllEmbeddedFiles(IAAFHeader* pHeader, 
                                                        const std::map<std::string, std::string>& mobIdToName, 
@@ -766,34 +609,47 @@ std::map<std::string, std::string> extractAllEmbeddedFiles(IAAFHeader* pHeader,
                 
                 aafLength_t dataSize = 0;
                 if (SUCCEEDED(pEssenceData->GetSize(&dataSize)) && dataSize > 0) {
-                    // Генерируем имя файла
-                    std::string outputPath;
+                    // **НОВАЯ РОБАСТНАЯ ЛОГИКА: Используем предоставленные функции**
+                    std::string outputPath; // Объявление переменной для пути файла
                     
-                    // Приоритет 1: Глобальная карта embedded файлов (собранная во время анализа клипов)
-                    auto globalIt = g_embeddedFileNames.find(mobIdStr);
-                    if (globalIt != g_embeddedFileNames.end() && !globalIt->second.empty()) {
-                        std::string originalName = globalIt->second;
-                        out << "[DEBUG] Found global mapping for " << mobIdStr << " -> " << originalName << std::endl;
-                        
-                        // Определяем правильное расширение файла по содержимому
-                        std::string detectedExtension = detectFileExtension(pEssenceData, out);
-                        
-                        // Убираем старое расширение и добавляем правильное
-                        size_t dotPos = originalName.find_last_of('.');
-                        if (dotPos != std::string::npos) {
-                            originalName = originalName.substr(0, dotPos);
-                        }
-                        
-                        outputPath = "extracted_media/" + originalName + detectedExtension;
-                    } 
-                    // Приоритет 2: Переданный маппинг embedded файлов
-                    else {
-                        auto embeddedIt = embeddedNameMapping.find(mobIdStr);
-                        if (embeddedIt != embeddedNameMapping.end() && !embeddedIt->second.empty()) {
-                            std::string originalName = embeddedIt->second;
-                            out << "[DEBUG] Found embedded mapping for " << mobIdStr << " -> " << originalName << std::endl;
+                    // Приоритет 1: Используем findMasterMobFromEssenceData для робастного поиска
+                    IAAFMob* pMasterMob = findMasterMobFromEssenceData(pHeader, pEssenceData);
+                    if (pMasterMob) {
+                        aafMobID_t masterMobID;
+                        if (SUCCEEDED(pMasterMob->GetMobID(&masterMobID))) {
+                            std::string masterMobIdStr = formatMobID(masterMobID);
                             
-                            // Определяем правильное расширение файла по содержимому
+                            // Ищем имя файла по MasterMob ID в глобальной карте
+                            auto masterIt = g_masterMobToFileName.find(masterMobIdStr);
+                            if (masterIt != g_masterMobToFileName.end() && !masterIt->second.empty()) {
+                                std::string originalName = masterIt->second;
+                                out << "[DEBUG] ROBUST MAPPING: Found master mob " << masterMobIdStr 
+                                    << " for essence " << mobIdStr << " -> " << originalName << std::endl;
+                                
+                                // Определяем правильное расширение файла по метаданным AAF
+                                std::string detectedExtension = detectFileExtension(pEssenceData, out);
+                                
+                                // Убираем старое расширение и добавляем правильное
+                                size_t dotPos = originalName.find_last_of('.');
+                                if (dotPos != std::string::npos) {
+                                    originalName = originalName.substr(0, dotPos);
+                                }
+                                
+                                outputPath = "extracted_media/" + originalName + detectedExtension;
+                            }
+                        }
+                        pMasterMob->Release();
+                    }
+                    
+                    // Fallback: Старая логика для случаев, где робастный поиск не сработал
+                    if (outputPath.empty()) {
+                        // Приоритет 2: Прямая проверка в карте g_masterMobToFileName 
+                        auto directMasterIt = g_masterMobToFileName.find(mobIdStr);
+                        if (directMasterIt != g_masterMobToFileName.end() && !directMasterIt->second.empty()) {
+                            std::string originalName = directMasterIt->second;
+                            out << "[DEBUG] Found direct master mob mapping for " << mobIdStr << " -> " << originalName << std::endl;
+                            
+                            // Определяем правильное расширение файла по метаданным AAF
                             std::string detectedExtension = detectFileExtension(pEssenceData, out);
                             
                             // Убираем старое расширение и добавляем правильное
@@ -803,97 +659,73 @@ std::map<std::string, std::string> extractAllEmbeddedFiles(IAAFHeader* pHeader,
                             }
                             
                             outputPath = "extracted_media/" + originalName + detectedExtension;
-                        } else {
-                            // Приоритет 3: Пытаемся найти SourceMob для этого EssenceData и извлечь имя файла
-                        std::string extractedName;
-                        IEnumAAFMobs* pMobEnum = nullptr;
-                        if (SUCCEEDED(pHeader->GetMobs(nullptr, &pMobEnum))) {
-                            IAAFMob* pMob = nullptr;
-                            while (SUCCEEDED(pMobEnum->NextOne(&pMob))) {
-                                aafMobID_t mobID;
-                                if (SUCCEEDED(pMob->GetMobID(&mobID))) {
-                                    std::string currentMobIdStr = formatMobID(mobID);
-                                    if (currentMobIdStr == mobIdStr) {
-                                        // Это SourceMob для этого embedded файла
-                                        IAAFSourceMob* pSourceMob = nullptr;
-                                        if (SUCCEEDED(pMob->QueryInterface(IID_IAAFSourceMob, (void**)&pSourceMob))) {
-                                            IAAFEssenceDescriptor* pEssDesc = nullptr;
-                                            if (SUCCEEDED(pSourceMob->GetEssenceDescriptor(&pEssDesc))) {
-                                                // Пытаемся получить имя файла через Locators
-                                                aafUInt32 numLocators = 0;
-                                                if (SUCCEEDED(pEssDesc->CountLocators(&numLocators)) && numLocators > 0) {
-                                                    IEnumAAFLocators* pLocatorEnum = nullptr;
-                                                    if (SUCCEEDED(pEssDesc->GetLocators(&pLocatorEnum))) {
-                                                        IAAFLocator* pLocator = nullptr;
-                                                        if (SUCCEEDED(pLocatorEnum->NextOne(&pLocator))) {
-                                                            aafUInt32 pathBufSize = 0;
-                                                            if (SUCCEEDED(pLocator->GetPathBufLen(&pathBufSize)) && pathBufSize > 0) {
-                                                                std::vector<aafCharacter> pathBuffer(pathBufSize / sizeof(aafCharacter));
-                                                                if (SUCCEEDED(pLocator->GetPath(pathBuffer.data(), pathBufSize))) {
-                                                                    std::string path = wideToUtf8(pathBuffer.data());
-                                                                    // Извлекаем имя файла из пути
-                                                                    size_t lastSlash = path.find_last_of("/\\");
-                                                                    if (lastSlash != std::string::npos) {
-                                                                        extractedName = path.substr(lastSlash + 1);
-                                                                    } else {
-                                                                        extractedName = path;
-                                                                    }
-                                                                    out << "[DEBUG] Extracted filename from SourceMob " << mobIdStr << ": " << extractedName << std::endl;
-                                                                }
-                                                            }
-                                                            pLocator->Release();
-                                                        }
-                                                        pLocatorEnum->Release();
-                                                    }
-                                                }
-                                                pEssDesc->Release();
-                                            }
-                                            pSourceMob->Release();
-                                        }
-                                        break;
-                                    }
-                                }
-                                pMob->Release();
-                            }
-                            pMobEnum->Release();
                         }
-                        
-                        if (!extractedName.empty()) {
-                            // Определяем правильное расширение файла по содержимому
+                    }
+                    
+                    // Приоритет 3: Глобальная карта embedded файлов (собранная во время анализа клипов)
+                    if (outputPath.empty()) {
+                        auto globalIt = g_embeddedFileNames.find(mobIdStr);
+                        if (globalIt != g_embeddedFileNames.end() && !globalIt->second.empty()) {
+                            std::string originalName = globalIt->second;
+                            out << "[DEBUG] Found global mapping for " << mobIdStr << " -> " << originalName << std::endl;
+                            
+                            // Определяем правильное расширение файла по метаданным AAF
                             std::string detectedExtension = detectFileExtension(pEssenceData, out);
                             
                             // Убираем старое расширение и добавляем правильное
-                            size_t dotPos = extractedName.find_last_of('.');
+                            size_t dotPos = originalName.find_last_of('.');
                             if (dotPos != std::string::npos) {
-                                extractedName = extractedName.substr(0, dotPos);
+                                originalName = originalName.substr(0, dotPos);
                             }
                             
-                            outputPath = "extracted_media/" + extractedName + detectedExtension;
-                        } else {
-                            // Используем общий маппинг MobID -> имя файла
-                            auto generalIt = mobIdToName.find(mobIdStr);
-                            if (generalIt != mobIdToName.end() && !generalIt->second.empty()) {
-                                std::string mappedName = generalIt->second;
-                                out << "[DEBUG] Found general mapping for " << mobIdStr << " -> " << mappedName << std::endl;
-                                
-                                // Определяем правильное расширение файла
-                                std::string detectedExtension = detectFileExtension(pEssenceData, out);
-                                
-                                // Убираем старое расширение и добавляем правильное
-                                size_t dotPos = mappedName.find_last_of('.');
-                                if (dotPos != std::string::npos) {
-                                    mappedName = mappedName.substr(0, dotPos);
-                                }
-                                
-                                outputPath = "extracted_media/" + mappedName + detectedExtension;
-                            } else {
-                                // Fallback: генерируем имя на основе MobID с правильным расширением
-                                std::string detectedExtension = detectFileExtension(pEssenceData, out);
-                                outputPath = "extracted_media/embedded_audio_" + mobIdStr + detectedExtension;
-                                out << "[DEBUG] Using fallback name for " << mobIdStr << " -> " << outputPath << std::endl;
+                            outputPath = "extracted_media/" + originalName + detectedExtension;
+                        }
+                    } 
+                    // Приоритет 4: Переданный маппинг embedded файлов
+                    if (outputPath.empty()) {
+                        auto embeddedIt = embeddedNameMapping.find(mobIdStr);
+                        if (embeddedIt != embeddedNameMapping.end() && !embeddedIt->second.empty()) {
+                            std::string originalName = embeddedIt->second;
+                            out << "[DEBUG] Found embedded mapping for " << mobIdStr << " -> " << originalName << std::endl;
+                            
+                            // Определяем правильное расширение файла по метаданным AAF
+                            std::string detectedExtension = detectFileExtension(pEssenceData, out);
+                            
+                            // Убираем старое расширение и добавляем правильное
+                            size_t dotPos = originalName.find_last_of('.');
+                            if (dotPos != std::string::npos) {
+                                originalName = originalName.substr(0, dotPos);
                             }
+                            
+                            outputPath = "extracted_media/" + originalName + detectedExtension;
                         }
+                    }
+                    
+                    // Приоритет 5: Fallback к стандартному маппингу mobIdToName
+                    if (outputPath.empty()) {
+                        auto generalIt = mobIdToName.find(mobIdStr);
+                        if (generalIt != mobIdToName.end() && !generalIt->second.empty()) {
+                            std::string mappedName = generalIt->second;
+                            out << "[DEBUG] Found general mapping for " << mobIdStr << " -> " << mappedName << std::endl;
+                            
+                            // Определяем правильное расширение файла по метаданным AAF
+                            std::string detectedExtension = detectFileExtension(pEssenceData, out);
+                            
+                            // Убираем старое расширение и добавляем правильное
+                            size_t dotPos = mappedName.find_last_of('.');
+                            if (dotPos != std::string::npos) {
+                                mappedName = mappedName.substr(0, dotPos);
+                            }
+                            
+                            outputPath = "extracted_media/" + mappedName + detectedExtension;
                         }
+                    }
+                    
+                    // Приоритет 6: Последний fallback - генерируем имя на основе MobID
+                    if (outputPath.empty()) {
+                        std::string detectedExtension = detectFileExtension(pEssenceData, out);
+                        outputPath = "extracted_media/embedded_audio_" + mobIdStr + detectedExtension;
+                        out << "[DEBUG] Using final fallback name for " << mobIdStr << " -> " << outputPath << std::endl;
                     }
                     
                     out << "[EXTRACT] Extracting embedded file " << mobIdStr << " (" << dataSize << " bytes) -> " << outputPath << std::endl;
@@ -959,3 +791,160 @@ std::string detectFileExtension(IAAFEssenceData* pEssenceData, std::ofstream& ou
     out << "[FORMAT] Unknown format, using default -> .wav" << std::endl;
     return ".wav";
 }
+
+// Функция для определения расширения embedded файла по MobID из метаданных AAF
+std::string getEmbeddedFileExtension(IAAFHeader* pHeader, const aafMobID_t& mobID, std::ofstream& out) {
+    if (!pHeader) return ".aif";  // fallback
+    
+    std::string mobIdStr = formatMobID(mobID);
+    out << "  [FORMAT] Getting extension for embedded MobID: " << mobIdStr << std::endl;
+    
+    // Ищем SourceMob (FileMob) с данным MobID
+    aafSearchCrit_t searchCrit;
+    searchCrit.searchTag = kAAFByMobKind;
+    searchCrit.tags.mobKind = kAAFFileMob;
+    
+    IEnumAAFMobs* pSourceMobEnum = nullptr;
+    if (SUCCEEDED(pHeader->GetMobs(&searchCrit, &pSourceMobEnum))) {
+        IAAFMob* pSourceMob = nullptr;
+        while (SUCCEEDED(pSourceMobEnum->NextOne(&pSourceMob))) {
+            aafMobID_t sourceMobID;
+            if (SUCCEEDED(pSourceMob->GetMobID(&sourceMobID))) {
+                if (memcmp(&mobID, &sourceMobID, sizeof(aafMobID_t)) == 0) {
+                    out << "  [FORMAT] Found matching SourceMob!" << std::endl;
+                    
+                    // Получаем EssenceDescriptor
+                    IAAFSourceMob* pSrcMob = nullptr;
+                    if (SUCCEEDED(pSourceMob->QueryInterface(IID_IAAFSourceMob, (void**)&pSrcMob))) {
+                        IAAFEssenceDescriptor* pEssDesc = nullptr;
+                        if (SUCCEEDED(pSrcMob->GetEssenceDescriptor(&pEssDesc))) {
+                            std::string extension = determineFormatFromEssenceDescriptor(pEssDesc, out);
+                            
+                            pEssDesc->Release();
+                            pSrcMob->Release();
+                            pSourceMob->Release();
+                            pSourceMobEnum->Release();
+                            return extension;
+                        }
+                        pSrcMob->Release();
+                    }
+                }
+            }
+            pSourceMob->Release();
+        }
+        pSourceMobEnum->Release();
+    }
+    
+    // Если не найдено, пытаемся найти через EssenceData
+    IEnumAAFEssenceData* pEssenceEnum = nullptr;
+    if (SUCCEEDED(pHeader->EnumEssenceData(&pEssenceEnum))) {
+        IAAFEssenceData* pEssenceData = nullptr;
+        while (SUCCEEDED(pEssenceEnum->NextOne(&pEssenceData))) {
+            aafMobID_t essenceMobID;
+            if (SUCCEEDED(pEssenceData->GetFileMobID(&essenceMobID))) {
+                std::string essenceMobIdStr = formatMobID(essenceMobID);
+                
+                if (essenceMobIdStr == mobIdStr) {
+                    out << "  [FORMAT] Found matching EssenceData, using header detection as fallback..." << std::endl;
+                    std::string extension = detectFileExtension(pEssenceData, out);
+                    pEssenceData->Release();
+                    pEssenceEnum->Release();
+                    return extension;
+                }
+            }
+            pEssenceData->Release();
+        }
+        pEssenceEnum->Release();
+    }
+    
+    // Если не найдено, возвращаем .aif по умолчанию для embedded файлов
+    out << "  [FORMAT] EssenceDescriptor not found, using default .aif for embedded" << std::endl;
+    return ".aif";
+}
+
+// Функция для определения формата из EssenceDescriptor
+std::string determineFormatFromEssenceDescriptor(IAAFEssenceDescriptor* pEssDesc, std::ofstream& out) {
+    if (!pEssDesc) {
+        out << "  [FORMAT] No EssenceDescriptor, using default .aif" << std::endl;
+        return ".aif";
+    }
+    
+    // Пытаемся получить DataEssenceDescriptor для информации о кодировке
+    IAAFDataEssenceDescriptor* pDataEssDesc = nullptr;
+    if (SUCCEEDED(pEssDesc->QueryInterface(IID_IAAFDataEssenceDescriptor, (void**)&pDataEssDesc))) {
+        aafUID_t codingUID;
+        if (SUCCEEDED(pDataEssDesc->GetDataEssenceCoding(&codingUID))) {
+            std::string extension = getExtensionFromCodingUID(codingUID, out);
+            pDataEssDesc->Release();
+            return extension;
+        }
+        pDataEssDesc->Release();
+    }
+    
+    // Пытаемся получить SoundDescriptor для аудио информации
+    IAAFSoundDescriptor* pSoundDesc = nullptr;
+    if (SUCCEEDED(pEssDesc->QueryInterface(IID_IAAFSoundDescriptor, (void**)&pSoundDesc))) {
+        // Получаем информацию о сжатии
+        aafUID_t compressionUID;
+        if (SUCCEEDED(pSoundDesc->GetCompression(&compressionUID))) {
+            std::string extension = getExtensionFromCodingUID(compressionUID, out);
+            pSoundDesc->Release();
+            return extension;
+        }
+        
+        // Получаем другую информацию для диагностики
+        aafUInt32 channelCount = 0;
+        aafRational_t sampleRate = {0, 1};
+        aafUInt32 quantizationBits = 0;
+        
+        if (SUCCEEDED(pSoundDesc->GetChannelCount(&channelCount))) {
+            out << "  [FORMAT] Channels: " << channelCount << std::endl;
+        }
+        if (SUCCEEDED(pSoundDesc->GetAudioSamplingRate(&sampleRate))) {
+            out << "  [FORMAT] Sample Rate: " << sampleRate.numerator << "/" << sampleRate.denominator << std::endl;
+        }
+        if (SUCCEEDED(pSoundDesc->GetQuantizationBits(&quantizationBits))) {
+            out << "  [FORMAT] Bit Depth: " << quantizationBits << std::endl;
+        }
+        
+        pSoundDesc->Release();
+    }
+    
+    // По умолчанию для embedded аудио возвращаем AIFF
+    out << "  [FORMAT] No specific coding found, using default .aif for embedded audio" << std::endl;
+    return ".aif";
+}
+
+// Функция для получения расширения из UID кодировки
+std::string getExtensionFromCodingUID(const aafUID_t& codingUID, std::ofstream& out) {
+    // Определяем известные кодировки AAF
+    const aafUID_t kAAFCodecDef_WAVE = {0x820f09b1, 0xeb9b, 0x11d2, {0x80, 0x9f, 0x00, 0x60, 0x08, 0x14, 0x3e, 0x6f}};
+    const aafUID_t kAAFCodecDef_AIFC = {0x4b1c1a45, 0x03f2, 0x11d4, {0x80, 0xfb, 0x00, 0x60, 0x08, 0x14, 0x3e, 0x6f}};
+    const aafUID_t kAAFCodecDef_PCM = {0x90ac17c8, 0xe3e2, 0x4596, {0x9e, 0x9e, 0xa6, 0xdd, 0x1c, 0x70, 0xc8, 0x92}};
+    
+    // Сравниваем UID
+    if (memcmp(&codingUID, &kAAFCodecDef_WAVE, sizeof(aafUID_t)) == 0) {
+        out << "  [FORMAT] Detected WAVE codec -> .wav" << std::endl;
+        return ".wav";
+    }
+    else if (memcmp(&codingUID, &kAAFCodecDef_AIFC, sizeof(aafUID_t)) == 0) {
+        out << "  [FORMAT] Detected AIFC codec -> .aif" << std::endl;
+        return ".aif";
+    }
+    else if (memcmp(&codingUID, &kAAFCodecDef_PCM, sizeof(aafUID_t)) == 0) {
+        out << "  [FORMAT] Detected PCM codec -> .aif (default for uncompressed)" << std::endl;
+        return ".aif";
+    }
+    else {
+        // Выводим UID для отладки
+        char uidStr[256];
+        sprintf(uidStr, "  [FORMAT] Unknown codec UID: {%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
+            codingUID.Data1, codingUID.Data2, codingUID.Data3,
+            codingUID.Data4[0], codingUID.Data4[1], codingUID.Data4[2], codingUID.Data4[3],
+            codingUID.Data4[4], codingUID.Data4[5], codingUID.Data4[6], codingUID.Data4[7]);
+        out << uidStr << " -> .aif (default)" << std::endl;
+        return ".aif";
+    }
+}
+
+

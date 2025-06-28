@@ -11,6 +11,9 @@
 // Глобальная карта для сбора имён embedded файлов во время анализа
 extern std::map<std::string, std::string> g_embeddedFileNames; // MobID -> правильное имя файла
 
+// Глобальная карта для связи MasterMob MobID (из CSV) с именами файлов
+extern std::map<std::string, std::string> g_masterMobToFileName;
+
 // Парсинг AAF файлов
 void processCompositionSlot(IAAFMobSlot* pSlot, std::ofstream& out, int slotIndex, 
                            const std::map<std::string, std::string>& mobIdToName,
@@ -64,4 +67,8 @@ void analyzeFadePatterns(const std::vector<IAAFComponent*>& components,
 
 // Генерирует правильное имя файла для Audio Clip
 std::string generateAudioClipFileName(IAAFSourceClip* pClip, const std::map<std::string, std::string>& mobIdToName,
-                                     std::ofstream& out);
+                                     IAAFHeader* pHeader, std::ofstream& out);
+
+// Функции для связи MasterMob и EssenceData
+IAAFMob* FindMasterMobFromEssenceData(IAAFHeader* pHeader, IAAFEssenceData* pEssenceData);
+IAAFEssenceData* FindEssenceDataFromMasterMob(IAAFHeader* pHeader, IAAFMob* pMasterMob);
