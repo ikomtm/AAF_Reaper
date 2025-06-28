@@ -35,7 +35,7 @@
   ========================
 [INFO |PAR]   AAF parsing: ✅ SUCCESS - 18 tracks parsed
 [INFO |GEN] 🔶 === END AAF PROPER PARSER ===
-[INFO |GEN] ⏱️ AAF Parsing took 22.00 ms
+[INFO |GEN] ⏱️ AAF Parsing took 23.00 ms
 [*] Found 18 audio tracks
 [*] Extracting embedded audio files...
 [INFO |EXT] Starting extraction of all embedded audio to: extracted_media
