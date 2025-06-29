@@ -4,6 +4,7 @@
 #include "debug_logger.h"
 #include <AAF.h>
 #include <string>
+#include <map>
 
 class AAFEssenceExtractor {
 public:
@@ -28,6 +29,9 @@ public:
     // Fallback получение имени файла
     std::string getFileNameFallbackFromSourceMob(IAAFSourceMob* pSourceMob, const aafMobID_t& mobID);
 
+    // Генерация правильного имени файла с суффиксом
+    std::string generateProperFileName(const std::string& originalFileName, const std::string& mobID);
+
     // Парсинг MobID из строки
     bool parseMobIDString(const std::string& mobIdStr, aafMobID_t& mobID);
 
@@ -38,12 +42,18 @@ public:
     std::string getExtensionFromCodingUID(const aafUID_t& codingUID);
 
 private:
-    // Извлечение EssenceData по MobID
-    bool extractEmbeddedEssenceByMobID(const aafMobID_t& mobID, const std::string& outputPath);
-
-    // Fallback метод извлечения через перечисление
-    bool extractEmbeddedEssenceByMobID_Fallback(const aafMobID_t& mobID, const std::string& outputPath);
+    // Извлечение данных из SourceMob
+    bool extractFromSourceMob(IAAFSourceMob* pSourceMob, 
+                             const std::string& originalFileName,
+                             const std::string& outputDir, 
+                             std::string& outPath);
+    
+    // Запись EssenceData в файл
+    bool extractEssenceDataToFile(IAAFEssenceData* pEssenceData, const std::string& filePath);
 
     IAAFHeader* m_pHeader;
     DebugLogger& logger;
+    
+    // Счетчики для генерации суффиксов файлов
+    std::map<std::string, int> fileCounters;
 };

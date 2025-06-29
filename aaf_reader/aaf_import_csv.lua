@@ -1,5 +1,39 @@
 -- AAF CSV Import Script for Reaper
--- Простой и надежный парсер CSV файлов
+-- Импортирует CSV файл, созданный C++ программой AAF Reader, и собирает секвенцию в Reaper
+-- 
+-- ВАЖНО! Порядок использования:
+-- 1. Сначала запустите C++ программу aaf_reader.exe с AAF файлом:
+--    aaf_reader.exe "path/to/your/file.aaf" --log-level=INFO
+--    Это создаст:
+--    - CSV файл с информацией о клипах (aaf_export.csv)
+--    - Папку extracted_media/ с извлеченными аудио файлами
+-- 2. Затем запустите этот скрипт в Reaper для импорта CSV и создания секвенции
+--
+-- Скрипт автоматически найдет извлеченные файлы в папке extracted_media/
+-- и импортирует их в правильном порядке согласно CSV файлу
+
+-- Функция для поиска извлеченного файла (упрощенная версия)
+local function findExtractedFile(fileName, extractedDir)
+    reaper.ShowConsoleMsg("    Searching for: " .. fileName .. "\n")
+    
+    -- Теперь fileName уже содержит правильное имя с суффиксом
+    local searchPatterns = {
+        extractedDir .. "/" .. fileName,
+        extractedDir .. "\\" .. fileName
+    }
+    
+    for _, pattern in ipairs(searchPatterns) do
+        local file = io.open(pattern, "r")
+        if file then
+            file:close()
+            reaper.ShowConsoleMsg("    Found file: " .. pattern .. "\n")
+            return pattern
+        end
+    end
+    
+    reaper.ShowConsoleMsg("    File not found: " .. fileName .. "\n")
+    return nil
+end
 
 -- Функция для парсинга CSV строки с учетом кавычек
 local function parseCSVLine(line)
@@ -74,23 +108,23 @@ local function readCSVFile(filename)
         if line:trim() ~= "" then
             local fields = parseCSVLine(line)
             
-            if #fields >= 10 then
+            if #fields >= 16 then
                 local trackIndex = tonumber(fields[1])
                 local trackName = fields[2]
                 local trackType = fields[3]
-                local volume = tonumber(fields[4]) or 1.0
-                local pan = tonumber(fields[5]) or 0.0
-                local mute = fields[6] == "1"
-                local solo = fields[7] == "1"
+                local trackVolume = tonumber(fields[4]) or 1.0
+                local trackPan = tonumber(fields[5]) or 0.0
+                local trackMute = fields[6] == "true"
+                local trackSolo = fields[7] == "true"
                 local clipFileName = fields[8]
-                local timelineStart = tonumber(fields[9]) or 0
-                local timelineEnd = tonumber(fields[10]) or 0
-                local length = tonumber(fields[11]) or 0
+                local mobID = fields[9] or ""
+                local timelineStart = tonumber(fields[10]) or 0
+                local timelineEnd = tonumber(fields[11]) or 0
                 local sourceStart = tonumber(fields[12]) or 0
-                local gain = tonumber(fields[13]) or 0
-                local clipVolume = tonumber(fields[14]) or 1.0
-                local clipPan = tonumber(fields[15]) or 0.0
-                local mobID = fields[16] or ""
+                local length = tonumber(fields[13]) or 0
+                local gain = tonumber(fields[14]) or 0
+                local clipVolume = tonumber(fields[15]) or 1.0
+                local clipPan = tonumber(fields[16]) or 0.0
                 local effects = fields[17] or ""
                 
                 -- Если новый трек
@@ -100,10 +134,10 @@ local function readCSVFile(filename)
                         trackIndex = trackIndex,
                         trackName = trackName,
                         trackType = trackType,
-                        volume = volume,
-                        pan = pan,
-                        mute = mute,
-                        solo = solo,
+                        volume = trackVolume,
+                        pan = trackPan,
+                        mute = trackMute,
+                        solo = trackSolo,
                         clips = {}
                     }
                     table.insert(tracks, currentTrack)
@@ -135,7 +169,7 @@ local function readCSVFile(filename)
                     table.insert(currentTrack.clips, clip)
                 end
             else
-                reaper.ShowConsoleMsg("Warning: Line " .. lineNumber .. " has only " .. #fields .. " fields\n")
+                reaper.ShowConsoleMsg("Warning: Line " .. lineNumber .. " has only " .. #fields .. " fields (expected at least 16)\n")
             end
         end
     end
@@ -216,6 +250,15 @@ local function importAAFFromCSV()
     reaper.ShowConsoleMsg("=== AAF CSV Import Started ===\n")
     reaper.ShowConsoleMsg("Loading from: " .. csvPath .. "\n")
     
+    -- Получаем директорию CSV файла для поиска извлеченных медиа файлов
+    local csvDir = csvPath:match("(.*)/[^/]*$") or csvPath:match("(.*)[/\\][^/\\]*$") or ""
+    
+    reaper.ShowConsoleMsg("CSV directory: " .. csvDir .. "\n")
+    reaper.ShowConsoleMsg("Note: Make sure you have already run the C++ AAF extractor to create the extracted_media folder and files.\n")
+    
+    -- Определяем папку для поиска извлеченных файлов
+    local extractedDir = csvDir .. "/extracted_media"
+    
     -- Читаем CSV
     local tracks = readCSVFile(csvPath)
     if not tracks or #tracks == 0 then
@@ -270,8 +313,15 @@ local function importAAFFromCSV()
             -- Добавляем клипы
             for j, clipData in ipairs(trackData.clips) do
                 reaper.ShowConsoleMsg("  Processing clip " .. j .. ": " .. clipData.fileName .. "\n")
+                reaper.ShowConsoleMsg("    Timeline: " .. clipData.timelineStart .. " - " .. clipData.timelineEnd .. " (length: " .. clipData.length .. ")\n")
+                reaper.ShowConsoleMsg("    Source start: " .. clipData.sourceStart .. "\n")
                 
-                local filePath = findAudioFile(clipData.fileName, csvPath)
+                -- Сначала ищем извлеченный файл, потом оригинальный
+                local filePath = findExtractedFile(clipData.fileName, extractedDir)
+                if not filePath then
+                    filePath = findAudioFile(clipData.fileName, csvPath)
+                end
+                
                 if filePath then
                     reaper.ShowConsoleMsg("    Found file: " .. filePath .. "\n")
                     
@@ -281,6 +331,8 @@ local function importAAFFromCSV()
                         -- Устанавливаем позицию и длительность
                         reaper.SetMediaItemInfo_Value(mediaItem, "D_POSITION", clipData.timelineStart)
                         reaper.SetMediaItemInfo_Value(mediaItem, "D_LENGTH", clipData.length)
+                        
+                        reaper.ShowConsoleMsg("    Set position: " .. clipData.timelineStart .. ", length: " .. clipData.length .. "\n")
                         
                         -- Добавляем аудио источник
                         local mediaSource = reaper.PCM_Source_CreateFromFile(filePath)
@@ -296,7 +348,7 @@ local function importAAFFromCSV()
                                 
                                 -- Применяем параметры клипа
                                 if clipData.gain ~= 0 then
-                                    local gainMult = math.pow(10, clipData.gain / 20)
+                                    local gainMult = 10 ^ (clipData.gain / 20)
                                     reaper.SetMediaItemTakeInfo_Value(take, "D_VOL", gainMult * clipData.volume)
                                 else
                                     reaper.SetMediaItemTakeInfo_Value(take, "D_VOL", clipData.volume)

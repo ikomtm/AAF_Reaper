@@ -8,11 +8,17 @@
 #include <cstring>
 
 std::string wideToUtf8(const std::wstring& wstr) {
-    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> conv;
-    return conv.to_bytes(wstr);
+    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+    return converter.to_bytes(wstr);
 }
 
+// Global formatMobID function - now uses the full formatting function
 std::string formatMobID(const aafMobID_t& mobID) {
+    return aaf_utils::formatMobIDFull(mobID);
+}
+
+// This is the definition for the legacy function.
+std::string aaf_utils::formatMobID_Legacy(const aafMobID_t& mobID) {
     const aafUID_t& uid = mobID.material;
     char buffer[64];
     snprintf(buffer, sizeof(buffer), 
@@ -21,6 +27,46 @@ std::string formatMobID(const aafMobID_t& mobID) {
              uid.Data4[0], uid.Data4[1], uid.Data4[2], uid.Data4[3], 
              uid.Data4[4], uid.Data4[5], uid.Data4[6], uid.Data4[7]);
     return std::string(buffer);
+}
+
+// New function to format the entire MobID into a full UMID string
+std::string aaf_utils::formatMobIDFull(const aafMobID_t& mobID) {
+    char buffer[128];
+    const unsigned char* m = (const unsigned char*)&mobID;
+    snprintf(buffer, sizeof(buffer),
+             "urn:smpte:umid:%02x%02x%02x%02x.%02x%02x%02x%02x.%02x%02x%02x%02x.%02x%02x%02x%02x.%02x%02x%02x%02x.%02x%02x%02x%02x.%02x%02x%02x%02x.%02x%02x%02x%02x",
+             m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7],
+             m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15],
+             m[16], m[17], m[18], m[19], m[20], m[21], m[22], m[23],
+             m[24], m[25], m[26], m[27], m[28], m[29], m[30], m[31]);
+    return std::string(buffer);
+}
+
+// New function to parse a UMID string back into a mobID
+bool aaf_utils::parseMobIDFull(const std::string& mobIdStr, aafMobID_t& mobID) {
+    std::string hexPart = mobIdStr;
+
+    // Strip URN prefix if it exists
+    const std::string urnPrefix = "urn:smpte:umid:";
+    if (hexPart.rfind(urnPrefix, 0) == 0) {
+        hexPart = hexPart.substr(urnPrefix.length());
+    }
+
+    // Remove all dots and hyphens
+    hexPart.erase(std::remove(hexPart.begin(), hexPart.end(), '.'), hexPart.end());
+    hexPart.erase(std::remove(hexPart.begin(), hexPart.end(), '-'), hexPart.end());
+
+    if (hexPart.length() != 64) { // 32 bytes * 2 hex chars/byte
+        return false;
+    }
+
+    unsigned char* m = (unsigned char*)&mobID;
+    for (size_t i = 0; i < 32; ++i) {
+        std::string byteString = hexPart.substr(i * 2, 2);
+        m[i] = static_cast<unsigned char>(strtol(byteString.c_str(), NULL, 16));
+    }
+
+    return true;
 }
 
 std::string formatTimecode(aafPosition_t position, const aafRational_t& editRate) {
@@ -91,6 +137,52 @@ aafPosition_t getCompositionStartTimecode(IAAFMob* pMob) {
     
     return startTC;
 }
+
+void aaf_utils::listAllMobs(IAAFHeader* header, std::ostream& out) {
+    if (!header) {
+        out << "ERROR: listAllMobs called with null header." << std::endl;
+        return;
+    }
+
+    IEnumAAFMobs* mobEnum = nullptr;
+    if (FAILED(header->GetMobs(nullptr, &mobEnum))) {
+        out << "ERROR: Failed to get Mob enumerator." << std::endl;
+        return;
+    }
+
+    IAAFMob* pMob = nullptr;
+    unsigned long count = 0;
+    out << "=== Listing all Mobs in AAF file ===" << std::endl;
+    while (SUCCEEDED(mobEnum->NextOne(&pMob))) {
+        aafMobID_t mobID;
+        if (FAILED(pMob->GetMobID(&mobID))) {
+            out << "ERROR: Failed to get MobID for a Mob." << std::endl;
+            pMob->Release();
+            continue;
+        }
+
+        // Use the new full formatting function
+        std::string mobIDStr = aaf_utils::formatMobIDFull(mobID);
+
+        aafUInt32 nameBufSize = 0;
+        pMob->GetNameBufLen(&nameBufSize);
+        std::string mobName = "(No Name)";
+        if (nameBufSize > 0) {
+            std::vector<aafCharacter> nameBuffer(nameBufSize / sizeof(aafCharacter));
+            if (SUCCEEDED(pMob->GetName(nameBuffer.data(), nameBufSize))) {
+                mobName = wideToUtf8(nameBuffer.data());
+            }
+        }
+
+        out << "Mob[" << count++ << "]: Name='" << mobName << "', MobID='" << mobIDStr << "'" << std::endl;
+
+        pMob->Release();
+    }
+
+    out << "=== End of Mob list ===" << std::endl;
+    mobEnum->Release();
+}
+
 
 bool isAudioTrack(IAAFMobSlot* pSlot) {
     IAAFSegment* pSegment = nullptr;

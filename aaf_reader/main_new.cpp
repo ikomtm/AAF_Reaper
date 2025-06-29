@@ -103,6 +103,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Call the diagnostic function to list all Mobs
+    aaf_utils::listAllMobs(pHeader, out);
+
     std::map<std::string, std::string> mobIdToName;
 
     // Инициализируем новый парсер

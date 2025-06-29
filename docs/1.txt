@@ -1,0 +1,564 @@
+24 PRELIMINARY DRAFT AAF Specification Version 1.1
+ Dictionary
+ The Dictionary has ClassDefinitions, PropertyDefinitions, TypeDefinitions, DataDefinitions,
+ParameterDefinitions,  and  EffectDefinitions.  If  an  AAF  file  contains  any  classes,  properties,  types,  data
+definitions,  parameter definitions, or effects that are not defined by this document, the Dictionary shall
+have  the definition for these extensions to this document.
+ Essence Data and Metadata
+ Essence data is picture, sound, and other forms of data that can be directly perceived. Metadata is data
+that  describes  essence  data,  performs  some  operation  on  essence  data,  or  provides  supplementary
+information about the essence data. For example, digitized sound data is essence data, but the data that
+describes its format, specifies its duration, and gives it a descriptive name is metadata.
+ Much  of  the  creative  effort  that  goes  into  a  multimedia  presentation  is  represented  by  metadata.  How
+one  section  transitions  into  another,  how  special  effects  modify  the  data  we  perceive,  and  how  all  the
+different kinds of primary data are related to each other (such as synchronizing picture and sound) are all
+represented  as  metadata.  This  interchange  format  provides  a  way  to  interchange  this  rich  set  of
+metadata.
+ Metadata Objects
+ A Metadata object (Mob) is an object that has a SMPTE universal label and describes essence. A mob is
+ A metadata object (Mob) is an object that has a universal identifer and consists of metadata. Metadata
+objects describe how essence data is formatted or how separate pieces of essence data are combined or
+composed.  Metadata  objects  are  very  general  and  can  be  used  to  describe  many  different  kinds  of
+essence data: video, sound, still picture, text, animation, graphics, and other formats.
+ Metadata objects have names and descriptions, but are primarily identified by a unique identifier, which
+is called a MobID.
+ A  Metadata  object  can  describe  more  than  one  kind  of  essence.  For  example,  a  metadata  object  can
+have audio, video, still image, and timecode data. A Metadata object has one or more MobSlots. Each
+MobSlot can describe only one kind of essence data. A MobSlot can be referenced from outside of the
+Metadata object. For example, a metadata object can have two MobSlots with audio, one MobSlot with
+video,  three  MobSlots  with  still  images,  and  two  MobSlots  with  timecode.  Each  MobSlot  in  a  Metadata
+Object  has  a  MobSlotID  that  is  unique  within  the  Metadata  Object.  To  reference  the  essence  data  in  a
+MobSlot, the MobID and the MobSlotID is used.
+ The following sections describe:
+• Kinds of Metadata Objects
+• How a Metadata Object is associated with essence data
+• Kinds of MobSlots
+AAF Specification Version 1.1        PRELIMINARY DRAFT 25
+• How one Metadata Object references another
+• How time-varying essence data, such as audio and video, is described in Metadata Objects and
+slots
+• How  other  kinds  of  essence  data,  such  as  still  images,  are  described  in  Metadata  Objects  and
+slots
+ Kinds of Metadata Objects
+ There are different kinds of Metadata Objects, which have metadata that is used in different ways.
+ Physical  Source  Metadata  Objects,  which  describe  media  that  was  used  to  generate  the  digital
+essence  data.  For  example  a  Physical  Source  Metadata  Object  can  describe  a  videotape  that  was
+digitized to create digital video data and digital audio data
+ File  Source  Metadata  Objects,  which  describe  the  digital  essence  data  and  provide  a  mechanism  to
+locate the digital essence data
+ Master Metadata Objects, which provide information that helps locate the File Source Metadata Objects
+ Composition Metadata Objects, which contain the creative decisions about how essence data is to be
+presented
+ Physical Source Metadata Objects and Other Kinds of Source Metadata Objects
+ Physical  Source  Metadata  Objects  have  descriptive  information  that  makes  it  possible  to  identify  the
+actual videotape or film. They can also have timecode or edgecode information used to find the section
+of tape or film that corresponds to a frame in the associated digital essence data.
+ File Source Metadata Objects
+ File Source Metadata Objects describe the format of the digital essence data and provide a mechanism
+to access the digital essence data. File Source Metadata Objects have information such as:
+• The  format  used  to  store  the  digital  essence  data,  such  as  WAVE  and  AIFC  for  audio  and
+RGBA, MPEG, and JPEG for video
+• The number of samples or frames for digital audio and video data
+• The kind of compression used
+• The number of pixels and the aspect ratio for picture data
+26 PRELIMINARY DRAFT AAF Specification Version 1.1
+ Master Metadata Objects
+ Master Metadata Objects provide an association between Composition Metadata Objects, which describe
+the creative decisions, and File Source Metadata Objects, which describe and identify the essence data.
+Master Metadata Objects insulate the Composition Metadata Object from the detailed information about
+how the essence data is stored. Master Metadata Objects can describe:
+• How video and audio digital essence data are synchronized
+• How  multiple  objects  containing  digital  essence  data  represent  different  digital  versions  of  the
+same original essence data - the versions may be different in the amount of compression used to
+or in the kind of format used to store it
+• Effect descriptions, such as color correction, that do not represent a creative decision but instead
+correct an error in essence acquisition or conversion
+ Composition Metadata Objects
+ Composition  Metadata  Objects  describe  the  creative  editing  and  composing  decisions  that  combine
+individual bits of essence data into a presentation. A Composition Metadata Object can describe creative
+decisions like the following:
+• The audio track contains "Also Sprach Zarathustra" when the video track showed the monolith in
+the Stanley Kubrick film 2001: A Space Odyssey
+• The pacing of the cuts between shots in Alfred Hitchcock's thrillers
+• How different still images are composed into a single image
+• How a special effect distorts a video image to make it appear as if it were a reflection on a pool
+of water
+ Metadata Object Kind Summary
+ Table 2-1 summarizes the different kinds of Metadata Objects.
+ 
+ Table 2-1 – Kinds of Metadata Objects
+ 
+ Kind of Metadata Object  Function
+ Composition Metadata Object  Describes creative decisions on how to combine or modify essence:
+ Decisions on order of essence data
+ Decisions on placement of essence data
+ Decisions on effects that modify or combine essence data
+ Master Metadata Object  Collect and possibly synchronize related essence data; provides
+indirect access to essence data, which is independent of storage
+details
+AAF Specification Version 1.1        PRELIMINARY DRAFT 27
+ File Source Metadata Object  Provides direct access to and describes format of digital essence
+data that is (or can be) stored in a computer file
+ Physical Source Metadata Object  Describes physical media such as a videotape or film
+ 
+ 
+ A CompositionMob describes how to combine individual essence elements to produce a program.
+ A SourceMob describes the format and derivation of essence stored in digital forms or stored on physical
+media, such as videotape or film. A SourceMob shall have a EssenceDescriptor object that specifies the
+format  of  the  essence.  If  the  SourceMob  describes  essence  stored  in  a  computer  file,  it  shall  have  a
+FileDescriptor  and  is  described  as  a  File  SourceMob.  If  the  SourceMob  describes  essence  stored  on
+physical media, such as videotape or film, it is described as a Physical SourceMob.
+ A  MasterMob  describes  how  individual  essence  elements  are  to  be  synchronized  or  interleaved.
+MasterMobs provide a level of indirection between CompositionMobs and SourceMobs.
+ A mob shall have a unique identification, which is called a MobID. A MobID has an  globally unique value
+and is specified using the AUID property type. If an AAF file refers to information in another AAF file, it
+shall identify that information by specifying a MobID.
+ A  mob  shall  have  one  or  more  MobSlots  Each  MobSlot  describes  an  element  of  essence  that  can  be
+referenced. A MobSlot shall specify an integer identifier, which is called a MobSlotID. Each MobSlot shall
+have a Segment object. A MobSlot can be a TimelineMobSlot, a StaticMobSlot, or an EventMobSlot. A
+TimelineMobSlot describesessence that varies over time, such as audio or video data. A StaticMobSlot
+describes  essence  that  has  a  value  that  has  no  relationship  to  time,  such  as  a  static  image.  An
+EventMobSlot  describes  essence  that  has  values  at  specified  points  in  time,  such  as  instructions  to
+trigger devices at specified times or instructions to display an interactive region during a specified time in
+a program.
+ A Mob can reference another Mob to describe the source or derivation of the essence. A Mob refers to
+another Mob by having a SourceClip object. An SourceClip object has a weak reference to a Mob using
+its identifying MobID value; shall identify a MobSlot within the referenced mob with a MobSlotID value;
+and when referencing a TimelineMobSlot shall specify an offset in time within the referenced
+TimelineMobSlot.
+ If  a Mob owned by a ContentStorage object has a reference to a second Mob, then the ContentStorage
+shall also own the second Mob.
+ A  SourceMob  may  desribe  derivation  metadata,  which  describes  a  physical  source  that  was  used  to
+generate the essence component. If the SourceMob describes derivation metadata, then the SourceMob
+shall    a  SourceClip  that  specifies  the  MobID  of  the  Physical  SourceMob  that  describes  the  physical
+media  source.  If  there  is  no  previous  generation  of    physical  media  source,  then  the  File  SourceMob
+shall  has  a  SourceClip  that  specifies  a  SourceID  value  of  0,  a  SourceMobslotID  value  of  0,  and,  in
+TimelineMobSlots, a StartTime value of 0.
+28 PRELIMINARY DRAFT AAF Specification Version 1.1
+ A MobID is globally unique. Two Mobs in an AAF file shall not have the same MobID. A mob in one AAF
+file may have the same MobID as a mob in another AAF file under either of the following conditions:
+ a) One mob is a duplicate of the other
+ b) One mob is a modified version of the other subject to the restrictions on modifications described
+in this clause
+ The type of mob determines the kind of modifications that can be made to it and still retain its identity.
+ The  information  in  a  file  source  mob  describing  the  format  of  essence  is  immutable  and  cannot  be
+modified. Modifications to a file source mob are limited to modifications to descriptive metadata and to
+the following limited modifications when the essence is being created or derived:
+ When  creating  essence  or  deriving  one  form  of  essence  from  another  form,  it  may  be
+necessary to create or derive the essence in steps. In this case, the SourceMob can be
+modified to describe the additional essence that is incorporated in a step. This should be
+done  in  a  manner  that  does  not  invalidate  a  reference  to  a  section  of  the  essence  that
+was previously created.
+ A SourceMob describing physical media may describe timecode information and may describe edgecode
+information.  This  timecode  and  edgecode  information  describes  the  timecode  and  edgecode  that  is
+present in the physical media.
+ A  MasterMob  may  be  modified  by  replacing  a  reference  to  a  SourceMob  with  a  reference  to  another
+SourceMob or it may be modified by inserting a reference to an alternate SourceMob. The modifications
+are subject to the restriction that the replacement or alternate SourceMobs should be representations of
+the same physical media as the originally referenced SourceMob.
+ A CompositionMob may be modified in any way.
+ Components
+ Components are essence elements. A component in a TimelineMobSlot has a duration expressed in edit
+units. The relation between edit units and clock time is determined by the edit rate of the
+TimelineMobSlot  that  has  the  component.  A  component  provides  a  value  for  each  edit  unit  of  its
+duration.
+ The kind of value a component provides is determined by the component’s data kind. A component can
+have  a  data  kind  that  corresponds  to    a  basic  kind  of  essence,  such  as  sound  or  picture  or  a  kind  of
+metadata such as timecode.
+ The Component class  has two subclasses: Segment  and Transition.
+ The Segment class subclasses include the following:
+ a) SourceClip which references a section of a MobSlot in another mob; for example a SourceClip in
+a TimelineMobSlot can describe video data
+AAF Specification Version 1.1        PRELIMINARY DRAFT 29
+ b) Sequence    which  specifies  that  its  set  components  are  arranged  in  a  sequential  order;  in  a
+TimelineMobSlot, the components are arranged in sequential time order
+ d) Effect  which  specifies  that  either  two  or  more  Segments  should  be  combined  using  a  specified
+effect or that one Segment should be modified using a specified effect
+ e) Filler which defines an unspecified value for its duration
+ A Transition object shall be a member of a Sequence’s set of Components and it shall be preceded by a
+Segment and followed by a Segment. A Transition causes the preceding and following Segments to be
+overlapped in time and to be combined by the Transition’s effect.
+ File SourceMobs and EssenceData objects
+ A  File  SourceMob  describes  essence  and  is  used  to  access  it,  but  does  not  own  it.  This  document
+separates the description and the storage of the essence for the following reasons:
+ a) Audio and video data and other essence can be very large and may need to be stored in a separate
+file,  on  a  different  disk,  over  a  network,  or  temporarily  deleted  to  free  disk  space.  Having  the  File
+SourceMob  separate  from  the  essence  provides  more  flexible  storage  options  while  still  allowing  the
+composition to use the same access mechanism.
+ b) Audio  and  video  data  or  other  essence  may  be  used  in  more  than  one  CompositionMob  and  these
+CompositionMobs can be in different files. Separating the File SourceMob from the essence means that
+only the information in the File SourceMob needs to be duplicated.
+ The essence described by a File SourceMob can be stored in three ways:
+ 1.    In a EssenceData object in the same file as the SourceMob
+ 2. In a EssenceData  object in a different file, which must contain a duplicate of the SourceMob
+ 3. In a data file that is not a wrapper file
+ The MobID connects the File SourceMob to the essence if it is stored in a EssenceData object.. The File
+SourceMob and its corresponding EssenceData  object have the same MobID value.
+ If the essence is stored in a data file that is not a wrapper file, then the data file is identified by locators in
+the  essence  descriptor.  However,  since  there  is  no  MobID  stored  with  this  essence,  it  is  difficult  to
+identify a data file if the file has been moved or renamed.
+ How File Source Metadata Objects are Associated with Digital Essence Data
+ File Source Metadata Objects and Digital essence data are associated by having the same MobID. Since
+the  ContentStorage  object    that  has  all  the  Metadata  Objects  and  Essence  data  objects  in  the  file,
+
+
+
+Describing Audio Essence
+ An AIFC object contains digitized audio data in the big-endian byte ordering. It contains data formatted
+according to the Audio Interchange File Format (AIFF), Apple Computer, Inc., Version 1. The audio data
+and the AIFC descriptor data are contained in the AIFC object.
+ Note that, although the AIFC standard is designed to support compressed audio data, the AIFC essence
+format  defined  by  this  standard  does  not  include  any  compressed  audio  formats.  The  only  AIFC
+compression form supported is NONE and  the  only  AIFC  data  items  that  are  necessary  are  the  COMM
+and  SSND  data  items.  All  other  AIFC  data  items  can  be  ignored.  The  descriptive  information  is
+contained directly in the AIFC object. The AIFC SSND data is duplicated in the AIFC Audio Descriptor to
+make it more efficient to access this information.
+ A WAVE object contains digitized audio data in the little-endian byte ordering. It contains data formatted
+according to the Microsoft/IBM Multimedia Programming Interface and Data Specifications, Version 1.0,
+but limited to the section describing the RIFF Waveform Audio File Format audio data. The WAVE file
+information  (without  the  sample  data)  is  duplicated  in  the  WAVE  Audio  Descriptor  to  make  it  more
+efficient to access this information.
+ The  descriptive  information  is  contained  directly  in  the  WAVE  object.  No  additional  data  properties  or
+objects  are  defined  for  WAVE  data,  because  this  format  includes  all  of  the  metadata  needed  for
+playback.
+AAF Specification Version 1.1        PRELIMINARY DRAFT 67
+ If  a  Master  Metadata  Object  or  Source  Metadata  Object  has  two  stereo  audio  essence  tracks,  the
+PhysicalChannelNumber  indicates  the  physical  input  channel  according  to  the  following  convention:  1
+indicates the left channel and 2 indicates the right channel.
+
+
+
+
+AAF Specification Version 1.1        PRELIMINARY DRAFT 117
+InterchangeObject
+EssenceData
++MobID : WeakReference
++Data : DataStream
++SampleIndex : DataStream
+SourceMob
+A EssenceData object shall have  the required properties listed in the following table.
+Property Name Type Explanation
+Pref:MobID :PrefT:WeakReference
+to Mob
+Identifies the source mob that describes the
+essence. Required.
+Pref:Data Pref:DataStream Contains the essence data. Required.
+Pref:SampleIndex Pref:DataStream Contains  an  index  to  the  samples  or  frames.  The
+format  of  the  index  is  determined  by  the  Codec.
+Optional.
+EssenceDescriptor Class
+The EssenceDescriptor class describes the format of the content data associated with a File Source mob
+or of the media associated with a Physical Source mob.
+The EssenceDescriptor class is a subclass of the InterchangeObject class.
+The EssenceDescriptor class is an abstract class; an object that belongs to the EssenceDescriptor class
+shall belong to a subclass of EssenceDescriptor.
+118 PRELIMINARY DRAFT AAF Specification Version 1.1
+InterchangeObject
+EssenceDescriptor
++Locator : StrongReferenceVector
+Locator0..*
+A EssenceDescriptor object may have  the optional properties described in the following table.
+Property Name Type Explanation
+Pref:Locator PrefT:
+StrongReferenceVector
+of Locator
+Has an array of Locator objects that provide
+operating-system-dependent data or text information
+that provide hints for finding files or physical media.
+Optional.
+Locator objects provide information either for finding files or for finding physical media according to the
+following rules.
+1) If the object owning the locators belongs to the FileDescriptor class as well as the
+EssenceDescriptor  class,  then  the  locators  are  owned  by  a  file  source  mob  and  provide
+information for finding files. A file source mob can have any number of locators and the locators
+may belong to any subclass of Locator.
+2) If  the  object  owning  the  locators  belongs  to  the  EssenceDescriptor  class  but  not  to  the
+FileDescriptor  class,  then  the  locators  are  owned  by  a  physical  source  mob  and  provide
+information for finding physical media. A physical source mob can have any number of locators;
+the locators shall belong to the TextLocator subclass of Locator.
+Note 1 Locators in a file source mobs provide hints to help find files associated
+with  the  file  source  mob,  but  they  are  only  hints  because  their  correctness  cannot  be
+guaranteed,  since  users  may  rename  or  delete  files.  Typically,  this  can  happen  if  the
+AAF file is renamed after being created. If your application cannot find a file by using the
+hint,  it  can  search  through  all  accessible  AAF  files  to  find  the  EssenceData  object  with
+the MobID value.
+Note 2 A  essence  descriptor  may  have  more  than  one  locator  objects  and  a
+essence  descriptor  may  have  more  than  one  locator  object  of  the  same  subclass  of
+Locator. For example, a file source mob may have more than one locator for any of the
+following reasons:
+AAF Specification Version 1.1        PRELIMINARY DRAFT 119
+– locators that provide hints to find the file on more than one operating system
+– locators that provide more than one hint on the same operating system
+EssenceGroup Class
+The EssenceGroup class describes multiple digital representations of the same original content source.
+The EssenceGroup class is a subclass of the Segment class.
+An EssenceGroup object shall be a Segment in a Master Mob MobSlot.
+Segment
+EssenceGroup
++Choices : StrongReferenceSet
++StillFrame : StrongReference SourceReference
+SourceReference
+1..*
+Choices
+StillFrame
+An EssenceGroup object shall have the required properties and may have the optional properties listed
+in the following table.
+Property Name Type Explanation
+Pref:Choices PrefT:
+StrongReferenceSet of
+SourceReference
+Has  a  set  of  Source  References  that  identify  the
+alternate representations that may be chosen.
+Required.
+120 PRELIMINARY DRAFT AAF Specification Version 1.1
+Pref:StillFrame PrefT:
+StrongReference to
+SourceReference
+Has a Source Reference that identifies the essence
+for a single-frame image representation of the
+essence. Optional.
+1. The  length  of  each  Source  Clip  in  the  Choices  set  must  be  the  same  as  the  length  of  the
+Essence Group object.
+2. The length of the StillFrame Source Clip must be 1.
+Note Typically  the  different  representations  vary  in  essence  format,  compression,  or
+frame size. The application is responsible for choosing the appropriate implementation of
+the essence.
+Event Class
+Event  is  an  abstract  class  that  defines  a  text  comment,  a  trigger,  or  an  area  in  the  image  that  has  an
+associated interactive action.
+Event is a subclass of Segment. Typically an Event is owned by a Sequence in an EventMobSlot.
+The  Event  class  is  an  abstract  class;  consequently  an  object  that  belongs  to  the  Event  class  shall  also
+belong to a subclass of the Event class.
+Event
++Position : Position
++Comment : String
+Segment
+An  Event  object  shall  have  the  required  properties  and  may  have  the  optional  properties  listed  in  the
+following table.
+Property Name Type Explanation
+Pref:Position PrefT:Position Specifies  the  starting  time  of  the  event  in  the
+EventMobSlot. Required.
+AAF Specification Version 1.1        PRELIMINARY DRAFT 121
+Pref:Comment PrefT:String Specifies the purpose of the event. Optional.
+An Event specifies its position as an absolute time expressed in the edit rates of the EventMobSlot that
+has it.
+EventMobSlot Class
+EventMobSlot has a Sequence of Events.
+EventMobSlot  is  a  subclass  of  MobSlot.  An  EventMobSlot  object,  as  all  MobSlots,  has  a  concrete
+Segment, which is typically a Sequence.
+MobSlot
+EventMobSlot
++EditRate : Rational
+An EventMobSlot object shall have the required properties listed in the following table.
+Property Name Type Explanation
+Pref:EditRate PrefT:Rational Specifies  the  units  in  which  the  events  specify
+their starting time and duration. Required.
+1.  An EventMobSlot shall have a concrete Segment that is either an Event or a Sequence.
+2.  If an EventMobSlot has a Sequence, then the Sequence shall conform to the following rules:
+A.   All Segments in the Sequence shall be Events.
+B.   All Events in the Sequence shall belong to the same concrete subclass of Event.
+C.   All Events in the Sequence shall have the same DataDefinition as does the Sequence.
+D.   In a Sequence, the Position of each Event shall be greater than or equal to the Position of
+the Event preceding it in the Sequence.
+122 PRELIMINARY DRAFT AAF Specification Version 1.1
+FileDescriptor Class
+The FileDescriptor  class describes essence associated with a File Source mob.
+The FileDescriptor class is a subclass of the EssenceDescriptor class.
+The  FileDescriptor  class  is  an  abstract  class;  consequently  an  object  that  belongs  to  the  FileDescriptor
+class shall also belong to a subclass of the FileDescriptor  class.
+EssenceDescriptor
+FileDescriptor
++SampleRate : Rational
++Length : Length
++ContainerDefinition : WeakReference
++CodecDefinition : WeakReference ContainerDefinition
+CodecDefinition
+A FileDescriptor object shall have the required properties listed in the following table.
+Property Name Type Explanation
+Pref:SampleRate PrefT:Rational The sample rate of the essence. Optional.
+Pref:Length PrefT:Length Duration of the essence in sample units.
+Optional.
+Pref:ContainerFormat PrefT:
+WeakReference to
+ContainerDefinition
+Identifies the container mechanism used to
+store the EssenceData. Required.
+AAF Specification Version 1.1        PRELIMINARY DRAFT 123
+Pref:CodecDefinition PrefT:
+WeakReference to
+CodecDefinition
+Identifies the mechanism used to compress and
+uncompress samples of EssenceData or used
+to convert samples of EssenceData from one
+format to another. Required.
+1. FileDescriptors  describing  static  essence  shall  omit  the  SampleRate  and  Length  properties.
+FileDescriptors  describing  time-varying  essence  shall  specify  the  SampleRate  and  Length
+properties.
+2. The Essence File Descriptor  specifies  the  sample  rate  and  the  length  in  the  sample  rate  of  the
+essence. The sample rate of the data can be different from the edit rate of the Source Clip in the
+File Source mob.
+Filler Class
+The Filler class represents an unspecified value for the duration of the object.
+The Filler class is a subclass of the Segment class.
+Segment
+Filler
+The Filler class does not define any additional properties.
+Note 1 Typically, a Filler object is used in a Sequence to allow positioning of a
+Segment when not all of the preceding material has been specified. Another typical use
+of  Filler  objects  is  to  fill  time  in  mob  Slots  and  Nested  scope  Slots  that  are  not
+referenced or played.
+Note 2 If a Filler object is played, applications can choose any appropriate blank
+essence to play. Typically, a video Filler object would be played as a black section, and
+
+
+MasterMob Class
+The MasterMob class provides access to the File Source Mobs and EssenceData Objects.
+The MasterMob class is a subclass of the Mob class.
+All MasterMob objects in a file shall be  owned by the ContentStorage object.
+Mob
+MasterMob
+The MasterMob class does not define any additional properties.
+An MasterMob object shall have one or more MobSlots.
+
+
+
+SourceClip Class
+The SourceClip class represents the content data and identifies the source of the content data.
+The SourceClip class is a subclass of the SourceReference class.
+SourceReference
+SourceClip
++StartTime : Position
++FadeInLength : Length
++FadeInType : FadeType
++FadeOutLength : Length
++FadeOutType : FadeType
+A SourceClip object shall have the required properties and may have the optional properties listed in the
+following table.
+Property Name Type Explanation
+Pref:StartTime PrefT:Position Specifies the offset from the origin of the
+referenced Mob Slot in edit units determined by
+the Source Clip object’s context. If the
+SourceID  has  a  value  0,  then  StartTime  must
+have a 0 value. Optional; see rule 1.
+Pref:FadeInLength PrefT:Length Specifies  the  length  of  an  audio  fade  in  to  be
+applied to the Source Clip. Optional.
+162 PRELIMINARY DRAFT AAF Specification Version 1.1
+Property Name Type Explanation
+Pref:FadeInType PrefT:FadeType Specifies  the  type  of  the  audio  fade  in;  may
+have one of the following values:
+0 No fade
+1 Linear amplitude fade
+2 Linear power fade
+3 Linear dB fade
+Additional  registered  and  private  fade  in  types
+may be defined. Optional.
+Pref:FadeOutLength PrefT:Length Specifies the length of an audio fade out to be
+applied to the Source Clip. Optional
+Pref:FadeOutType PrefT:FadeType Specifies  the  type  of  the  audio  fade  out;  may
+have one of the following values:
+0 No fade
+1 Linear amplitude fade
+2 Linear power fade
+3 Linear dB fade
+Additional  registered  and  private  audio  fade
+types may be defined. Optional.
+1. If  the  SourceClip  references  a  TimelineMobSlot  or  an  EventMobSlot,  then  the  StartTime
+property  shall  be  specified.  If  the  SourceClip  references  a  StaticMobSlot,  then  the  StartTime
+property shall not be specified.
+2. The data definition of the Segment owned by the referenced Mob Slot shall be the same the data
+definition of the Source Clip object.
+3. The fade properties are only allowed when the Component DataDefinition  specifies  Sound.
+4. If the source clip references a track that specifies a different edit rate than the track owning the
+source  clip,  the  StartTime  and  Length  values  must  be  converted  from  the  edit  rate  of  the  track
+owning the source clip to the edit rate of the referenced track.
+Note 1 In  a  Composition  Mob,  Source  Clips  reference  a  section  of  essence  by
+specifying the Master Mob that describes the essence.
+Note 2 In a Master Mob, Source Clips reference the essence by specifying the
+File Source Mob that is associated with the essence.
+Note 3 In a File Source Mob, Source clips reference the content data stored on
+a  physical  media,  such  as  tape  or  film,  by  specifying  the  Physical  Source  Mob  that
+describes the media.
+Note 4 In  a  Physical  Source  Mob,  Source  Clips  reference  the  content  data
+stored  on  a  previous  generation  of  physical  media  by  specifying  the  Physical  Source
+Mob that describes the media.
+AAF Specification Version 1.1        PRELIMINARY DRAFT 163
+Note 5 If a Source Mob represents the original essence source and there is no
+previous  generation,  then  its  Source  Clips  must  specify  a  value  0-0-0  for  its  SourceID
+and 0 values for SourceTrackID and StartTime.
+SourceMob Class
+The SourceMob class describes content data that is either stored in a digital form in a file or stored on a
+physical media, such as tape or film.
+The SourceMob class is a subclass of the Mob class.
+All SourceMob objects shall be  owned by the ContentStorage object.
+Mob
+SourceMob
++EssenceDescription : StrongReference
+EssenceDescriptor
+A SourceMob object shall have the required properties and may have the optional properties listed in the
+following table.
+Property Name Type Explanation
+Pref:EssenceDescription PrefT:
+StrongReference
+to EssenceDescriptor
+Describes the format of the essence
+associated with the Source Mob. Required.
+1. A SourceMob object shall have one or more MobSlots.
+164 PRELIMINARY DRAFT AAF Specification Version 1.1
+2. An  SourceMob  object  shall  either  be  a  File  Source  Mob  or  a  Physical  Source  Mob.  If  a
+SourceMob has a Essence Descriptor that belongs to the FileDescriptor class, then the
+SourceMob is a File Source Mob. If a SourceMob has a Essence Descriptor that does not belong
+to the FileDescriptor class, then the SourceMob is a Physical Source Mob.
+3. A  File  Source  Mob  shall  have  at  least  one  MobSlot.  If  the  digital  essence  is  a  stream  of
+interleaved  content  data,  then  the  File  Source  Mob  shall  at  least  have  one  MobSlot  for  each
+channel of interleaved content data.
+4. A  Physical  Source  Mob  describes  physical  media,  such  as  an  audio  tape,  film,  or  videotape.  A
+Physical Source Mob shall have at least one MobSlot. If the physical media contains more than
+one  track  of  content  data,  then  the  Physical  Source  Mob  should  have  one  MobSlot  for  each
+physical track. In addition, the Physical Source Mob may have a MobSlot for timecode data and
+may have a MobSlot for edgecode data.
+5. The  MobSlots  in  a  File  Source  Mob  should  have  a  Segment  that  is  a  Source  Clip.  If  there  is  a
+Mob  that  describes  the  previous  generation  of  content  data,  the  Source  Clip  should  specify  the
+MobID  of  that  Mob.  The  previous  generation  can  be  a  Physical  Source  Mob  or  another  File
+Source Mob. If there is no previous generation of content data or there is no Mob describing it,
+the Source Clip should specify a MobID of 0.
+6. The MobSlot in a Physical Source Mob should have a Segment that is a Source Clip, Timecode,
+or Edgecode. If there is a Mob that describes the previous generation of content data, the Source
+Clip should specify the MobID of that Mob. The previous generation should be a Physical Source
+Mob.  If  there  is  no  previous  generation  of  content  data  or  there  is  no  Mob  describing  it,  the
+Source Clip should specify a MobID of 0.
+The length of the Segment in the Mob Slot indicates the duration of the essence. If you create a Source
+Mob for a physical media source and you do not know the duration of the essence, specify a length of 24
+hours.
+The essence represented by a Source Mob is immutable. If the essence changes, such as if a videotape
+is redigitized, you must create a new Source Mob with a new Mob ID.
+SourceReference Class
+SourceReference is an abstract class that represents the essence or other data described by a MobSlot
+in a Mob.
+SourceReference  is  an  abstract  class;  any  object  that  belongs  to  the  SourceReference  class  shall  also
+belong to a subclass of SourceReference.
+AAF Specification Version 1.1        PRELIMINARY DRAFT 165
+Segment
+SourceReference
++SourceID : WeakReference
++SourceMobSlotID : UInt32
+Mob
+A SourceReference object shall have the required properties and may have the optional properties listed
+in the following table.
+Property Name Type Explanation
+Pref:SourceID PrefT:
+WeakReference to
+Mob
+Identifies the Mob being referenced. If
+WeakReference is to an object that specifies a 0
+value  for  the  MobID,  it  means  that  the  Mob
+owning the SourceReference describes the
+original  source.  If  the  property  is  omitted,  the
+SourceReference  is  specifying  another  MobSlot
+in the same Mob. Optional.
+Pref:SourceMobSlotID PrefT:UInt32 Specifies the MobSlotID of a Mob Slot within the
+specified  Mob.  If  the  SourceID  has  a  value  0,
+then  SourceTrackID  shall  also  have  a  0  value.
+Required.
+An SourceReference object in a Mob refers to a MobSlot in another Mob by specifying the second Mob's
+Mob  ID  and  the  MobSlot  ID  of  the  MobSlot  owned  by  it.  To  create  a  SourceReference  that  refers  to  a
+MobSlot within the same Mob as the SourceReference, omit the SourceID property.
