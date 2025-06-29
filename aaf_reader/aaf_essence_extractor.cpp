@@ -145,21 +145,30 @@ bool AAFEssenceExtractor::extractAllEmbeddedAudio(const std::vector<AAFAudioTrac
 }
 
 bool AAFEssenceExtractor::parseMobIDString(const std::string& mobIdStr, aafMobID_t& mobID) {
-    if (mobIdStr.length() < 36)
+    if (mobIdStr.empty())
+        return false;
+
+    // Нормализуем строку: убираем пробелы и фигурные скобки, приводим к верхнему регистру
+    std::string normalized;
+    normalized.reserve(mobIdStr.size());
+    for (char c : mobIdStr) {
+        if (c == '{' || c == '}' || std::isspace(static_cast<unsigned char>(c)))
+            continue;
+        normalized.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+    }
+
+    if (normalized.length() < 36)
         return false; // Минимальная длина UUID
 
-    // Сначала пытаемся найти Mob с совпадающей строкой ID
-    aafSearchCrit_t crit;
-    crit.searchTag = kAAFByMobKind;
-    crit.tags.mobKind = kAAFAllMob;
-
+    // Попытка найти Mob с совпадающей material частью
+    aafSearchCrit_t crit{ kAAFByMobKind, { kAAFAllMob } };
     IEnumAAFMobs* pEnum = nullptr;
     if (SUCCEEDED(m_pHeader->GetMobs(&crit, &pEnum))) {
         IAAFMob* pMob = nullptr;
         while (SUCCEEDED(pEnum->NextOne(&pMob))) {
             aafMobID_t id;
             if (SUCCEEDED(pMob->GetMobID(&id))) {
-                if (formatMobID(id) == mobIdStr) {
+                if (formatMobID(id) == normalized) {
                     mobID = id;
                     pMob->Release();
                     pEnum->Release();
@@ -171,8 +180,8 @@ bool AAFEssenceExtractor::parseMobIDString(const std::string& mobIdStr, aafMobID
         pEnum->Release();
     }
 
-    // Если не нашли полный MobID, парсим только material часть как раньше
-    std::string cleanStr = mobIdStr;
+    // Если не нашли полный MobID, парсим только material часть
+    std::string cleanStr = normalized;
     cleanStr.erase(std::remove(cleanStr.begin(), cleanStr.end(), '-'), cleanStr.end());
 
     if (cleanStr.length() < 32)
@@ -190,7 +199,7 @@ bool AAFEssenceExtractor::parseMobIDString(const std::string& mobIdStr, aafMobID
     }
 
     // Значения по умолчанию из спецификации AAF
-    static const aafUInt8 prefix[12] = {0x06,0x0e,0x2b,0x34,0x04,0x01,0x01,0x01,0x0d,0x01,0x02,0x01};
+    static const aafUInt8 prefix[12] = {0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x01,0x0D,0x01,0x02,0x01};
     memcpy(mobID.SMPTELabel, prefix, sizeof(prefix));
     mobID.length = 0x10;
     mobID.instanceHigh = 0x60;
