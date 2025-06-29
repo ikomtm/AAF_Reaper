@@ -1,0 +1,26 @@
+name: Build AAF Reader
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: true  # Если ты используешь git submodules
+
+    - name: Set up CMake
+      uses: jwlawson/actions-setup-cmake@v1
+
+    - name: Configure CMake
+      run: cmake -S aaf_reader -B aaf_reader/build -G "Visual Studio 17 2022"
+
+    - name: Build
+      run: cmake --build aaf_reader/build --config Release
