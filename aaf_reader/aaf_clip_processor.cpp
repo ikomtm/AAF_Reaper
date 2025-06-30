@@ -1,4 +1,5 @@
 #include "aaf_clip_processor.h"
+#include "aaf_fade_detector.h"
 #include "aaf_utils.h"
 #include <AAFTypeDefUIDs.h>
 #include <AAFClassDefUIDs.h>
@@ -6,6 +7,7 @@
 
 AAFClipProcessor::AAFClipProcessor(IAAFHeader* pHeader, DebugLogger& logger)
     : m_pHeader(pHeader), logger(logger), audioProperties(nullptr), essenceExtractor(nullptr) {
+    fadeDetector = std::make_unique<AAFFadeDetector>(logger);
 }
 
 AAFClipProcessor::~AAFClipProcessor() {
@@ -55,6 +57,9 @@ void AAFClipProcessor::processSegmentForClips(IAAFSegment* pSegment,
         // Шаг 3: Обрабатываем SourceClip -> MasterMob цепочку
         AAFAudioClipInfo clipInfo = processSourceClipChain(pSourceClip, trackInfo.editRate, currentPosition);
         if (!clipInfo.mobID.empty()) {
+            if (fadeDetector) {
+                fadeDetector->analyzeSegmentForFade(pSegment, clipInfo);
+            }
             trackInfo.clips.push_back(clipInfo);
         }
         

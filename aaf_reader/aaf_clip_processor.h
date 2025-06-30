@@ -2,6 +2,8 @@
 
 #include "data_structures.h"
 #include "debug_logger.h"
+#include "aaf_fade_detector.h"
+#include <memory>
 #include <AAF.h>
 
 // Forward declarations
@@ -37,4 +39,5 @@ private:
     // Зависимости на другие модули (не владеющие указатели)
     AAFAudioProperties* audioProperties;
     AAFEssenceExtractor* essenceExtractor;
+    std::unique_ptr<AAFFadeDetector> fadeDetector;
 };
