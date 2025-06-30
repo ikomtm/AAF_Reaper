@@ -9,6 +9,7 @@
 #include <map>
 #include <algorithm>
 #include <iomanip>
+#include <AAFTypes.h>  // Для aafUID_t
 
 enum class LogLevel {
     LOG_ERROR = 0,    // Только критические ошибки
@@ -26,6 +27,7 @@ enum class LogCategory {
     ESSENCE,      // Работа с EssenceData/EssenceAccess
     TRACKS,       // Обработка треков
     CLIPS,        // Обработка клипов
+    FADES,        // Обработка fade-информации
     CSV_EXPORT    // Экспорт CSV
 };
 
@@ -61,6 +63,9 @@ public:
     
     // Статистика
     void logStatistics(const std::string& title, const std::vector<std::pair<std::string, int>>& stats);
+    
+    // Утилитарные методы
+    std::string formatUID(const aafUID_t& uid);
     
     // Методы для вывода сводной информации
     void logSummary(const std::string& title, const std::map<std::string, std::string>& summary);

@@ -179,6 +179,7 @@ std::string DebugLogger::categoryToString(LogCategory category) {
         case LogCategory::ESSENCE:    return "ESS";
         case LogCategory::TRACKS:     return "TRK";
         case LogCategory::CLIPS:      return "CLP";
+        case LogCategory::FADES:      return "FAD";
         case LogCategory::CSV_EXPORT: return "CSV";
         default: return "???";
     }
@@ -195,4 +196,21 @@ void DebugLogger::log(LogLevel level, LogCategory category, const std::string& m
     
     m_out << "[" << levelToString(level) << "|" << categoryToString(category) << "] "
           << getIndent() << message << std::endl;
+}
+
+std::string DebugLogger::formatUID(const aafUID_t& uid) {
+    std::ostringstream oss;
+    oss << std::hex << std::setfill('0') 
+        << std::setw(8) << uid.Data1 << "-"
+        << std::setw(4) << uid.Data2 << "-"
+        << std::setw(4) << uid.Data3 << "-"
+        << std::setw(2) << static_cast<unsigned>(uid.Data4[0])
+        << std::setw(2) << static_cast<unsigned>(uid.Data4[1]) << "-"
+        << std::setw(2) << static_cast<unsigned>(uid.Data4[2])
+        << std::setw(2) << static_cast<unsigned>(uid.Data4[3])
+        << std::setw(2) << static_cast<unsigned>(uid.Data4[4])
+        << std::setw(2) << static_cast<unsigned>(uid.Data4[5])
+        << std::setw(2) << static_cast<unsigned>(uid.Data4[6])
+        << std::setw(2) << static_cast<unsigned>(uid.Data4[7]);
+    return oss.str();
 }

@@ -93,49 +93,79 @@ std::string formatTimecode(aafPosition_t position, const aafRational_t& editRate
 aafPosition_t getCompositionStartTimecode(IAAFMob* pMob) {
     aafPosition_t startTC = 0;
     
-    // Ищем Timecode слот
+    if (!pMob) return startTC;
+    
+    // Ищем TimelineMobSlot с минимальным Origin (стартовый таймкод)
     aafNumSlots_t numSlots = 0;
     if (SUCCEEDED(pMob->CountSlots(&numSlots))) {
         for (aafUInt32 i = 0; i < numSlots; ++i) {
             IAAFMobSlot* pSlot = nullptr;
             if (SUCCEEDED(pMob->GetSlotAt(i, &pSlot))) {
                 
-                // Проверяем тип данных слота
-                IAAFSegment* pSegment = nullptr;
-                if (SUCCEEDED(pSlot->GetSegment(&pSegment))) {
-                    IAAFComponent* pComp = nullptr;
-                    if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFComponent, (void**)&pComp))) {
-                        IAAFDataDef* pDataDef = nullptr;
-                        if (SUCCEEDED(pComp->GetDataDef(&pDataDef))) {
-                            // Используем простую проверку имени вместо IsTimecodeKind
-                            // так как эти методы могут быть недоступны в базовом интерфейсе
-                            
-                            // Если это TimecodeStream, получаем стартовую позицию
-                            IAAFTimecodeStream* pTCStream = nullptr;
-                            if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFTimecodeStream, (void**)&pTCStream))) {
-                                // Получаем origin слота как начальное время
-                                IAAFTimelineMobSlot* pTimelineSlot = nullptr;
-                                if (SUCCEEDED(pSlot->QueryInterface(IID_IAAFTimelineMobSlot, (void**)&pTimelineSlot))) {
-                                    pTimelineSlot->GetOrigin(&startTC);
-                                    pTimelineSlot->Release();
-                                }
-                                pTCStream->Release();
-                            }
-                            
-                            pDataDef->Release();
+                // Проверяем, является ли это TimelineMobSlot
+                IAAFTimelineMobSlot* pTimelineSlot = nullptr;
+                if (SUCCEEDED(pSlot->QueryInterface(IID_IAAFTimelineMobSlot, (void**)&pTimelineSlot))) {
+                    
+                    // Получаем Origin слота - это может быть стартовый таймкод
+                    aafPosition_t origin = 0;
+                    if (SUCCEEDED(pTimelineSlot->GetOrigin(&origin))) {
+                        // Если это первый слот или у него меньший origin, используем его
+                        if (i == 0 || origin < startTC) {
+                            startTC = origin;
                         }
-                        pComp->Release();
                     }
-                    pSegment->Release();
+                    
+                    // Дополнительно попробуем найти Timecode сегмент
+                    IAAFSegment* pSegment = nullptr;
+                    if (SUCCEEDED(pSlot->GetSegment(&pSegment))) {
+                        
+                        // Пробуем получить IAAFTimecode
+                        IAAFTimecode* pTimecode = nullptr;
+                        if (SUCCEEDED(pSegment->QueryInterface(IID_IAAFTimecode, (void**)&pTimecode))) {
+                            
+                            // Получаем timecode структуру
+                            aafTimecode_t timecode;
+                            if (SUCCEEDED(pTimecode->GetTimecode(&timecode))) {
+                                startTC = timecode.startFrame;
+                                pTimecode->Release();
+                                pSegment->Release();
+                                pTimelineSlot->Release();
+                                pSlot->Release();
+                                return startTC; // Нашли explicit timecode, возвращаем его
+                            }
+                            pTimecode->Release();
+                        }
+                        pSegment->Release();
+                    }
+                    
+                    pTimelineSlot->Release();
                 }
                 pSlot->Release();
-                
-                if (startTC != 0) break; // Нашли timecode, выходим
             }
         }
     }
     
     return startTC;
+}
+
+IAAFMob* findCompositionMob(IAAFHeader* pHeader) {
+    if (!pHeader) return nullptr;
+    
+    IEnumAAFMobs* pEnum = nullptr;
+    aafSearchCrit_t crit = { kAAFByMobKind, { kAAFCompMob } };
+    
+    if (FAILED(pHeader->GetMobs(&crit, &pEnum))) {
+        return nullptr;
+    }
+
+    IAAFMob* pMob = nullptr;
+    if (pEnum->NextOne(&pMob) == AAFRESULT_SUCCESS) {
+        pEnum->Release();
+        return pMob;  // return first CompositionMob found
+    }
+    
+    pEnum->Release();
+    return nullptr;
 }
 
 void aaf_utils::listAllMobs(IAAFHeader* header, std::ostream& out) {

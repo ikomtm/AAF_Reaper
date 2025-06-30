@@ -1,0 +1,634 @@
+
+40 PRELIMINARY DRAFT AAF Specification Version 1.1
+ MobSlots  can  describe  timeline  essence  data,  such  as  audio  and  video,  static  essence  data,  such  as
+static images, and other kinds of data, such as text or events.
+ A  Composition  Metadata  Object  can  have    MobSlots  that  all  describe  timeline  essence  data,  that  all
+describe static essence data, or that describe different kinds of essence data.
+ A simple Composition Metadata Object could have two Timeline MobSlots describing audio data and one
+Timeline  MobSlot      describing  video  data.  The  edited  program  produced  by  this  Composition  Metadata
+Object would consist of three synchronized tracks: two audio and one video.
+ Another simple Composition Metadata Object could have one Static MobSlot , describing a single static
+image composed by combining a set of static images.
+ A  complex  Composition  Metadata  Object  could  have  Timeline  Mob  Slots,  Static  Mob  Slots,  and  Event
+Mob  Slots.  The  edited  program  produced  by  this  Composition  Metadata  Object  could  have  elements
+from  each  of  these  Mob  Slots  combined  in  some  form  by  the  objects  in  the  Composition  Metadata
+Object.
+ Timeline Mob Slots
+ Timeline Mob Slots typically have a Sequence of audio or video segments. Each segment can consist of
+a  simple  Source  Clip  or  a  complex  hierarchy  of  Effects.  Figure  3-1  is  a  containment  diagram  of  a
+Composition Metadata Object that has only Timeline Mob Slots with audio and video data.
+AAF Specification Version 1.1        PRELIMINARY DRAFT 41
+ 
+CompositionMob
+TimelineMobSlot1..n
+{ordered}
+Sequence
+1..n
+{ordered}
+Transition Segment
+Component
+OperationGroup Filler NestedScope ScopeReference Sequence SourceClipSelector
+ Figure 3-1: Containment Diagram for Composition Metadata Object with Timeline Mob Slots
+ Sequences
+ A Sequence can have the following components:
+• Source  Clip:  Specifies  a  section  of  essence  or  other  time-varying  data  and  identifies  the  Mob
+Slot in another Metadata Object or within the same Metadata Object that describes the essence.
+• Filler: Specifies an unknown value for the Component’s duration. Typically, a Filler is used in a
+Sequence  to  allow  positioning  of  a  Segment  when  not  all  of  the  preceding  material  has  been
+specified.  Another  typical  use  of  Filler  objects  is  to  fill  time  in  Mob  Slots  and  Nested  Scope
+Segments that are not referenced or played.
+• Transition: Causes two adjacent Segments to overlap in time and to be combined by an effect.
+• EffectDefinition property of an Effect: Specifies an effect to be used in a Composition Metadata
+Object; specifies kind of effect, input essence segments, and control arguments.
+• Sequence: A Sequence within a Sequence combines a set of Components into a single segment,
+which is then treated as a unit in the outer Sequence.
+42 PRELIMINARY DRAFT AAF Specification Version 1.1
+• Nested Scope: Defines a scope of slots that can reference each other. The Nested Scope object
+produces  the  values  of  the  last  slot  within  it.  Typically,  Nested  Scopes  are  used  to  enable
+layering or to allow a component to be shared.
+• Scope Reference: Refers to a section in a Nested Scope slot.
+• Selector: Specifies a selected Segment and preserves references to some alternative Segments
+that  were  available  during  the  editing  session.  The  alternative  Segments  can  be  ignored  while
+playing  a  Composition  Metadata  Object  because  they  do  not  effect  the  value  of  the  Selector
+object and cannot be referenced from outside of it. The alternative Segments can be presented
+to the user when the Composition Metadata Object is being edited. Typically, a Selector object is
+used to present alternative presentations of the same content, such as alternate camera angles
+of the same scene.
+ The Sequence object combines a series of timeline Components in sequential order. If the Sequence has
+only Segments, each Segment is played sequentially after the Segment that precedes it. The time in the
+Composition Metadata Object that a Segment starts is determined by the Components that precede it in
+the Sequence.
+ Transitions
+ A Transition can occur in a Sequence between two Segments. The Transition causes the preceding and
+following  Segments  to  overlap  in  time.  The  Transition  specifies  an  effect  that  is  used  to  combine  the
+overlapping Segments. Figure 3-2 illustrates the Sequence containment showing Transition, which itself
+has an Effect.
+ 
+AAF Specification Version 1.1        PRELIMINARY DRAFT 43
+ 
+Sequence
+Segment
+1..*
+{ordered}
+OperationGroup Filler NestedScope ScopeReference Sequence SourceClip
+Component
+Transition
+OperationGroup
+{Transitions occur between
+two Segments}
+Selector
+ Figure 3-2: Containment Diagram of Sequence with Transition
+ Figure 3-3 shows an instance diagram of a Sequence containing Source Clips and a Transition. It shows
+the timeline view of the Sequence, in which the Transitions cause the two Source Clips to overlap
+44 PRELIMINARY DRAFT AAF Specification Version 1.1
+ 
+th = 100
+urceClip
+SourceClip
++Length : Length = 80
+SourceClip
++Length : Length = 100
+CompositionMob
+TimelineMobSlot
+Sequence
++Length : Length = 230
+Transition
++Length : Length = 75
+SourceClip
++Length : Length = 125
+SourceClip
+Length : Length = 100
+SourceClip
+Length : Length = 125
+SourceClip
+Length : Length = 80
+Transition
+Length : Length = 75
+SourceClip
+Length : Length = 80
+SourceClip
+Length : Lengt
+Transition
+Length : Length = 75
+Timeline View
+0 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+ Figure 3-3: Transition Cause Segments to Overlap
+ To  calculate  the  duration  of  a  Sequence  with  Transitions,  you  add  the  durations  of  the  Segments  and
+then subtract the duration of the Transitions. In the example in Figure 3-3, the duration of the Sequence
+is 125 + 100 + 80 —  75, which equals 230.
+AAF Specification Version 1.1        PRELIMINARY DRAFT 45
+ If you are inserting a Transition between two Source Clips, and you want to preserve the overall duration
+of the two Segments, you must adjust the Source Clip’s Length and StartTime values.
+ Cuts and the Transition Cut Point
+ Transitions  also  specify  a  CutPoint.  The  CutPoint  has  no  direct  effect  on  the  results  specified  by  a
+Transition,  but  the  CutPoint  provides  information  that  is  useful  if  an  application  wishes  to  remove  or
+temporarily  replace  the  transition.  The  CutPoint  represents  the  time  within  the  Transition  that  the
+preceding Segment should end and the following one begins, if you remove the Transition and replace it
+with  a  cut.  To  remove  a  Transition  and  preserve  the  absolute  time  positions  of  both  Segments,  your
+application should trim the end of the preceding Segment by an amount equal to the Transition Length
+minus the CutPoint offset, and trim the beginning of the succeeding Segment by an amount equal to the
+CutPoint offset.
+ Treating Transitions As Cuts
+ If you cannot play a Transition’s effect, you should treat it as a cut. Treating it as a cut means that you
+should play the two Segments surrounding the transition as if they had been trimmed, as described in the
+preceding paragraphs. If you play the two Segments without trimming, the total elapsed time for them will
+be greater than it should be, which can cause synchronization problems.
+ Restriction on Overlapping Transitions
+ Transitions can occur only between two Segments. In addition, the Segment that precedes the Transition
+and the Segment that follows the Transition must each have a Length that is greater than or equal to the
+Length of the Transition. If a Segment has a Transition before it and after it, the Segment’s Length must
+be  greater  than  or  equal  to  the  sum  of  the  Length  of  each  of  the  two  Transitions.  This  ensures  that
+Transitions do not overlap. These restrictions allow applications to treat Transitions in a uniform manner
+and to avoid ambiguous constructions.
+ It  is  possible  to  create  Sequences  that  appear  to  start  or  end  with  Transitions  or  that  appear  to  have
+overlapping  Transitions.  To  create  the  appearance  of  a  Transition  at  the  beginning  of  a  Sequence,
+precede  the  Transition  with  a  Filler  object  that  has  the  same  length  as  the  Transition.  To  create  the
+appearance of a Transition at the end of a Sequence, follow the Transition with a Filler object that has
+the same length as the Transition.
+ To  create  the  appearance  of  overlapping  Transitions,  you  nest  the  Transitions  by  using  a  Sequence
+within  another  Sequence.  You  can  put  two  Segments  separated  by  a  Transition  in  the  inner  Sequence.
+Then  you  can  use  this  Sequence  object  as  the  Segment  before  or  after  another  Transition.  The
+Transitions will appear to be overlapping.
+46 PRELIMINARY DRAFT AAF Specification Version 1.1
+ Static Mob Slots
+ Static Mob Slots describe Essence data that has no relationship to time. Consequently, Static Mob Slots
+do  not  specify  an  edit  rate  and  Segments  in  Static  Mob  Slots  do  not  have  a  duration.  Figure  3-4  is  a
+containment diagram for a Composition Metadata Object that has only Static Mob Slots.
+ 
+CompositionMob
+StaticMobSlot1..n
+{ordered}
+Segment
+OperationGroup NestedScope ScopeReference SourceClip Selector
+ Figure 3-4: Containment Diagram for Composition Metadata Objects with Static Mob Slots
+ 
+ Combining Different Types of Mob Slots
+ A Composition Metadata Object can have Timeline Mob Slots, Static Mob Slots, and Event Mob Slots.
+Although  each  kind  of  slot  can  only  have  Segments  with  the  corresponding  relationship  to  time,  it  is
+possible for a Mob Slot to have a reference to another kind of Mob Slot. For example, a video Timeline
+Mob Slot can have a reference to an image in a Static Mob Slot.
+ A Mob Slot can reference a different kind of Mob Slot by containing a Source Clip referencing the other
+Mob Slot or by containing an Effect with a Source Clip referencing the other Mob Slot. The Source Clip
+can  reference  Mob  Slots  in  other  Metadata  Objects  or  can  reference  other  Mob  Slots  in  the  same
+Metadata Object.
+AAF Specification Version 1.1        PRELIMINARY DRAFT 47
+ Conversion Operations
+ The Source Clip provides the conversion operation in some simple cases:
+• Taking an instantaneous value (such as a still frame) from a Timeline Component.
+• Repeating a Static Segment to create a Timeline Segment.
+ In  these  cases,  the  Data  Kind  of  the  two  Segments  must  be  the  same.  In  all  other  cases,  an  explicit
+operation  is  required.  The  Operation  Definition  must  explicitly  allow  inputs  of  the  appropriate  temporal
+nature  and  produce  a  result  of  the  required  temporal  nature.  Conversion  operations  are  summarized  in
+Table 3-1.
+ Table 3-1: Static, Timeline, and Event Conversions
+ Convert to:
+ Convert from:
+ Static  Event  Timeline
+ Static   Source Clip plus
+Operation
+ Source Clip (Start Time ignored)
+ Event  Source Clip plus
+Operation
+  Source Clip plus Operation
+ Timeline  Source Clip
+(Length ignored)
+ Source Clip plus
+Operation
+ 
+ Operations
+ This interchange standard includes a set of essence operation effects (such as transitions or chroma-key
+effects),  which  can  be  used  to  modify  or  transform  the  essence  to  produce  a  Segment  of  essence.
+Operations can act on and produce any kind of essence: timeline, static, or event. The essence that an
+effect  acts  on  is  called  its  input  essence.  These  effects  use  the  same  binary  plug-in  model  used  to
+support codecs, essence handlers, or other digital processes to be used to process the essence to create
+the desired impact. The binary plug-in model gives applications the flexibility to determine when a given
+effect or codec has been referenced inside of the file and to determine if that effect or codec is available,
+and if not, to find it and load it on demand.
+ Many common effects act on timeline or static essence and produce the same kind of essence as they
+act on. For example, a picture-in-picture effect can act on either timeline video or static image essence.
+It combines two input essence Segments to produce a resulting Segment. A picture-in-picture effect with
+timeline video input essence Segments produces a timeline video result. A picture-in-picture effect with
+static image input essence Segments produces a static image result. There are also effects than convert
+from one kind of essence to another.
+ A  specific  usage  of  an  effect  in  an  file  is  described  by  an  OperationGroup  object.  The  OperationGroup
+that produces a segment is made up of the following:
+• Has an ordered set of input essence Segments.
+48 PRELIMINARY DRAFT AAF Specification Version 1.1
+• Is associated with an OperationDefinition object.
+• Has a set of effect control parameters.
+• May optionally have a rendered version of the Operation.
+
+4. Describing and Storing Essence This chapter shows how AAF files describe essence.
+ Overview of Essence AAF  files  can  describe  and  contain  a  broad  range  of  essence  types  and  formats.  These  essence  types
+include the following:
+• Video essence in various formats (RGBA, YCbCr, MPEG)
+• Sampled audio essence in various formats (AIFC, Broadcast WAVE)
+• Static image essence
+• MIDI music essence
+• Text essence in various formats
+• Compound essence formats (DV, MPEG transport streams, ASF)
+ In  addition  to  the  essence  formats  described  in  this  document,  this  interchange  standard  provides  a
+general  mechanism  for  describing  essence  formats  and  defines  a  plug-in  mechanism  that  allows
+applications to import and export new types of essence data.
+ This  standard  defines  the  metadata  in  structures  that  are  independent  of  the  storage  details  of  the
+essence  format.  This  independence  enables  Composition  Metadata  Objects  to  reference  essence  data
+independently of its format. A Composition Metadata Object describes editing decisions in a manner that
+is independent of the following:
+• Byte order of the essence (AIFC and WAVE)
+• Whether the essence data is contained within the  file or is in another container file
+• Whether the digital essence data is accessible
+56 PRELIMINARY DRAFT AAF Specification Version 1.1
+• Format or compression used to store the digital essence data
+ This  interchange  standard  makes  it  easier  for  applications  to  handle  different  formats  by  providing  a
+layer that is common to all.
+ Essence source information describes the format of audio and video digital data, how the digital data was
+derived from tape or film, and the format of the tape and film. Source information can also include tape
+timecode, film edgecode data, and pulldown information.
+ This interchange standard uses the following mechanisms to describe essence:
+• Master  Metadata  Objects  provide  a  level  of  indirection  between  Composition  Metadata
+Objects  and  File  Source  Metadata  Objects  and  can  synchronize  File  Source  Metadata
+Objects.
+• Source  Metadata  Objects  describe  digital  essence  data  stored  in  files  or  a  physical
+media source such as videotape, audio tape, and film. The Source Metadata Object has
+the following objects that provide information about the essence:
+• Mob  Slots  specify  the  number  of  tracks  in  the  essence  source,  the  duration  of
+each  track,  the  edit  rate,  and  the  Source  Metadata  Object  that  describes  the
+previous  generation  of  essence.  In  addition,  Mob  Slots  can  have  timecode  and
+edge code information.
+• Essence Descriptors describe the kind of essence and the format of the essence
+and specify whether the Source Metadata Objects describe digital essence data
+stored in files or a physical media source.
+• Pulldown objects describe how essence is converted between a film speed and a
+video speed.
+• Essence  data  objects  contain  the  digital  essence  data  and  provide  supplementary
+information such as frame indexes for compressed digital essence data.
+ This chapter contains the following sections:
+• Describing Essence with Master Metadata Objects
+• Describing Essence with Source Metadata Objects
+• Describing Timecode
+• Describing Essence with Pulldown
+ Describing Essence with Master Metadata Objects
+ A  Master  Metadata  Object  provides  a  level  of  indirection  for  accessing  Source  Metadata  Objects  from
+Composition  Metadata  Objects.  The  essence  associated  with  a  Source  Metadata  Object  is  immutable.
+Consequently,  if  you  must  make  any  changes  to  the  essence  data,  you  must  create  a  new  Source
+Metadata  Object  with  a  new  unique  MobID.  Typical  reasons  to  change  the  essence  data  include
+redigitizing  to  extend  the  section  of  the  essence  included  in  the  file,  redigitizing  to  change  the
+compression used to create the digital essence data, and redigitizing to change the format used to store
+the essence data, such as from AIFF audio data to WAVE audio data. A Composition Metadata Object
+may  have  many  Source  Clip  objects  that  reference  essence  data  updating  every  Source  Clip  in  the
+Composition  Metadata  Object  each  time  the  essence  is  redigitized  would  be  inefficient.  By  having  the
+AAF Specification Version 1.1        PRELIMINARY DRAFT 57
+Composition Metadata Object access a Source Metadata Object only through a Master Metadata Object,
+this interchange standard ensures that you have to change only a single Master Metadata Object when
+you make changes to the essence data.
+ In  addition,  a  Master  Metadata  Object  can  synchronize  essence  data  in  different  Source  Metadata
+Objects.  For  example,  when  an  application  digitizes  a  videotape,  it  creates  separate  Source  Metadata
+Objects for the video and audio data. By having a single Master Metadata Object with one MobSlot for
+each Source Metadata Object, the Composition Metadata Object avoids having to synchronize the audio
+and video tracks each time it references essence from different tracks of the videotape.
+ The  same  essence  data  can  exist  in  more  than  one  digital  essence  data  implementation.  Different
+implementations represent the same original essence data but can differ in essence format,
+compression,  or  byte  order.  If  there  are  multiple  implementations  of  digitized  essence,  the  Master
+Metadata Object can have a Essence Group object. The Essence Group object has a set of Source Clip
+objects, each of which identifies a Source Metadata Object associated with a different implementation of
+the  essence  data.  An  application  can  examine  these  implementations  to  find  the  one  that  it  is  able  to
+play  or  that  it  can  play  most  efficiently.  Essence  Groups  may  be  needed  if  you  have  systems  with
+different architectures or compression hardware accessing a single interchange file.
+ If, when a essence data file is redigitized, it has to be broken into multiple files, this can be represented
+by  a  Sequence  object  in  the  Master  Metadata  Object  that  has  a  series  of  Source  Clip  objects,  each
+identifying the Source Metadata Object associated with one of the files.
+ Typically,  Master  Metadata  Objects  have  a  very  simple  structure.  They  have  an  externally  visible  Mob
+Slot  for  each  track  of  essence  and  do  not  have  any  other  slots.  Typically,  each  Mob  Slot  has  a  single
+Source  Clip  object  that  identifies  the  Source  Metadata  Object.  Master  Metadata  Objects  cannot  have
+Operation Groups, Nested Scopes, Selectors, Edit Rate Converters, or Transitions.
+ The following lists the reasons for having a Mob Slot in a Master Metadata Object have an object other
+than a Source Clip:
+• If  there  are  multiple  implementations  of  the  same  essence,  the  Mob  Slot  can  have  a
+Essence Group instead of a Source Clip object.
+• If the essence source has been broken into several Source Metadata Objects, the Mob
+Slot  can  have  a  Sequence  object.  The  Sequence  object  cannot  have  any  component
+other than a Source Clip object or a Essence Group object.
+• If one of a limited set of correction effects is applied to the essence data
+ Figure 4-1 illustrates the containment diagram for a Master Metadata Object describing timeline essence
+data, such as audio or video.
+58 PRELIMINARY DRAFT AAF Specification Version 1.1
+ 
+MasterMob
+TimelineMobSlot1..*
+Segment
+SourceClip EssenceGroup SequenceOperationGroup
+1..* SourceReference Segment1..*
+ Figure 4-1: Master Metadata Object Containment Diagram
+ Describing Essence with Source Metadata Objects
+ A  Source  Metadata  Object  represents  a  file  containing  digitized  essence  or  a  physical  media  source,
+such as an audio tape, film, or videotape.
+ If the essence described by the Source Metadata Object has been derived from a previous generation of
+essence,  the  Mob  Slots  should  have  Source  Clips  that  identify  the  Metadata  Object  that  describes  the
+previous  generation.  If  the  Source  Metadata  Object  describes  essence  that  is  not  derived  from  a
+previous generation, the Mob Slots should have Source Clips that specify the null Metadata Object.
+ Sample Rate and Edit Rate in Timeline Essence
+ In many cases the sample rate and edit rate in a file Source Metadata Object will be the same. However,
+it is possible to use different edit rates and sample rates in a Source Metadata Object. For example, you
+can create a Source Metadata Object for digital audio data, where the edit rate matches the edit rate of
+the associated video but the sample rate is much higher. The sample rate is specified in the SampleRate
+property in the File Descriptor . When accessing the digital essence data, your application must convert
+from the edit rate to the sample rate.
+AAF Specification Version 1.1        PRELIMINARY DRAFT 59
+ The Source Origin in Timeline Essence
+ When an application accesses the digital essence data, it locates the starting position by measuring from
+a position known as the source origin. Each file Source Metadata Object indicates this position for each
+Timeline Mob Slot in order to provide a reference point for measurements of its essence data.
+ For  example,  when  you  first  digitize  the  audio  from  a  tape,  your  application  would  most  likely  assign  a
+value of 0 to the Origin property. In this case the source origin corresponds to the beginning of the data.
+Any Source Clip that references this audio will specify a StartTime value that is relative to the start of the
+essence.
+ However, the location of the origin does not necessarily correspond to the actual beginning of the source.
+For  example,  if  a  user  redigitizes  the  audio  data  in  the  previous  example  to  add  more  data  at  the
+beginning,  the  new  Essence  data  object  starts  at  a  different  point.  However,  the  application  will  ensure
+that  existing  Source  Clips  in  Composition  Metadata  Objects  remain  valid  by  changing  the  value  of  the
+Origin property in the Master Metadata Object. By setting the Origin to the current offset of the original
+starting point, the application ensures that existing Composition Metadata Objects remain valid.
+ Converting Edit Units to Sample Units
+ A  Timeline  Mob  Slot  uses  its  own  edit  rate.  So,  a  Source  Clip  in  a  Composition  Metadata  Object
+indicates  the  starting  position  in  the  source  and  the  length  of  the  Segment  in  edit  units.  When  an
+application plays a Composition Metadata Object, it maps the Composition Metadata Object's references
+to the source material into references to the corresponding digital essence data.
+ To play the digital essence data referenced by a Composition Metadata Object, the application uses the
+StartTime and Length values of the Composition Metadata Object's Source Clip, which are specified in
+edit  units,  along  with  the  edit  rate  to  determine  the  samples  to  be  taken  from  the  essence  data.  The
+application  converts  EUs  to  sample  durations,  adds  the  file  Mob  Slot's  Origin  to  the  Source  Clip's
+StartTime,  then  converts  the  resulting  sample  time  offset  to  a  sample  byte  offset.  Performing  the  final
+calculation  for  some  essence  data  formats  involves  examining  the  data  to  find  the  size  in  bytes  of  the
+particular  samples  involved.  (All  samples  need  not  be  the  same  size.)  For  example,  the  JPEG  Image
+Data object has a frame index.
+ An application would not need to reference the original physical Source Metadata Object of the digitized
+data unless it is necessary to redigitize or generate a source-relative description, such as an EDL or cut
+list.
+ In summary:
+• Composition  Metadata  Objects  deal  entirely  in  edit  units,  which  are  application-defined
+time units.
+• Digital  essence  data  such  as  video  frames,  animation  frames,  and  audio  samples  are
+stored in a stream of bytes, measured in sample units that represent the time duration of
+a single sample.
+60 PRELIMINARY DRAFT AAF Specification Version 1.1
+• Applications  access  essence  data  by  converting  edit  units  to  sample  units  and  then  to
+byte offsets.
+• Master Metadata Objects maintain a reference point in the digitized essence data called
+the source origin. Composition Metadata Objects reference positions in the essence data
+relative to the origin.
+ Describing Essence Format with Essence Descriptors
+ Source  Metadata  Objects  describe  the  details  of  the  essence  format  with  a  Essence  Descriptor  object.
+Essence Descriptor is an abstract class that describes the format of the essence data. The essence data
+can be digitized essence data stored in a file or it can be essence data on audio tape, film, videotape, or
+some other form of essence storage.
+ There are two kinds of Essence Descriptors:
+• File  Descriptors  that  describe  digital  essence  data  stored  in  Essence  data  objects  or  in
+noncontainer  data  files.  The  Essence  File  Descriptor  class  is  also  an  abstract  class;  its
+subclasses  describe  the  various  formats  of  digitized  essence.  If  a  Essence  Descriptor
+object  belongs  to  a  subclass  of  File  Descriptor,  it  describes  digital  essence  data.  If  a
+Essence Descriptor object does not belong to a subclass of File Descriptor, it describes a
+physical media source.
+• Essence  Descriptors  that  describe  a  physical  media  source.  This  specification  defines
+the Film Descriptor and Tape Descriptor, but additional private or registered subclasses
+of Essence Descriptors can be defined.
+ If the digital essence data is stored in an AAF file, the ContainerDefinition property in the File Descriptor
+shall reference the ContainerDefinition for the AAF file format.. Digital essence data can be stored in a
+noncontainer data file to allow an application that does not support this interchange standard to access it
+or  to  avoid  duplicating  already  existing  digital  essence  data.  However,  since  there  is  no  MobID  stored
+with  raw  essence  data,  it  is  difficult  to  identify  a  raw  essence  data  file  if  the  Locator  information  is  no
+longer  valid.  The  format  of  the  digital  essence  data  in  the  raw  file  is  the  same  as  it  would  be  if  it  were
+stored in an Essence data object.
+ The  File  Descriptor  specifies  the  sample  rate  and  length  of  the  essence  data.  The  sample  rate  of  the
+data can be different from the edit rate of the Source Clip object that references it.
+ Figure  4-2  illustrates  the  containment  diagram  for  File  Source  Metadata  Objects  and  Figure  4-3
+illustrates the containment diagram for Physical Source Metadata Objects
+
+Describing Tape and Film
+ The Tape Descriptor describes videotape and audio tape media sources. The Film Descriptor describes
+film  sources.  Their  properties  describe  the  physical  storage  format  used  for  the  essence.  When  you
+create  a  tape  or  film  Source  Metadata  Object,  you  can  include  as  many  of  these  properties  as  your
+application  has  access  to.  Since  these  properties  are  optional,  they  can  be  omitted  when  they  are
+unknown.
+ Describing Timecode
+ Timecode  typically  is  described  in  a  Source  Metadata  Object  or  in  a  Composition  Metadata  Object.
+Timecode can be described by specifying a starting timecode value or by including a stream of timecode
+data.
+ A  Timecode  object  in  a  Source  Metadata  Object  typically  appears  in  a  Mob  Slot  in  a  Source  Metadata
+Object that describes a videotape or audio tape. In this context it describes the timecode that exists on
+the tape.
+ If a tape has a contiguous timecode, the Source Metadata Object can have:
+• A  Mob  Slot  for  each  track  of  essence  on  the  tape;  the  Mob  Slot  should  have  a  single
+Source Clip whose Length equals the duration of the tape.
+• A  Mob  Slot  for  the  timecode  track  that  has  a  Start  value  equal  to  the  timecode  at  the
+beginning of the tape and whose Length equals the duration of the tape.
+ If  a  tape  contains  noncontiguous  timecodes,  then  the  Mob  Slot  can  have  a  Sequence  of  Timecode
+objects;  each  representing  a  contiguous  section  of  timecode  on  the  tape  or  can  specify  the  timecode
+stream data.
+ In some cases the information required to accurately describe the tape's timecode may not be available.
+For  example,  if  only  a  section  of  a  videotape  is  digitized,  the  application  may  not  have  access  to  the
+timecode at the start of the videotape. In these cases, applications may create a Source Metadata Object
+in which the duration of the Source Clip does not necessarily match the duration of the videotape.
+ The timecode information for digital essence data and file Source Metadata Objects is contained in the
+videotape  Source  Metadata  Object  that  describes  the  videotape  used  to  generate  the  digital  essence
+data.
+ The starting timecode for digital essence data is specified by the Source Clip in the File Source Metadata
+Object  and  by  the  timecode  track  in  the  videotape  Source  Metadata  Object.  The  Source  Clip  specifies
+the  MobID  of  the  videotape  Source  Metadata  Object,  the  MobSlotID  for  the  Mob  Slot  describing  the
+68 PRELIMINARY DRAFT AAF Specification Version 1.1
+essence data, and the offset in that track. To find the timecode value, you must find the value specified
+for that offset in the timecode Mob Slot of the videotape Source Metadata Object.
+ If a videotape has continuous timecode for the entire tape, it is specified by a single Timecode object. If
+a  videotape  has  discontinuous  timecode,  interchange  files  typically  describe  it  with  a  single  Timecode
+object  that  encompasses  all  timecode  values  that  are  used  on  the  videotape.  Discontinuous  timecode
+can also be described by the following
+• A timecode track that has a sequence of Timecode objects, each of which specifies the
+starting  timecode  and  the  duration  of  each  section  of  continuous  timecode  on  the
+videotape
+• A timecode stream that duplicates the timecode data stored on the videotape
+ If  the  timecode  track  has  a  single  Timecode  object,  you  add  the  offset  to  the  starting  timecode  value
+specified by the Timecode object.
+ If  the  timecode  track  has  a  sequence  of  Timecode  objects,  you  calculate  the  timecode  by  finding  the
+Timecode  object  that  covers  the  specified  offset  in  the  track  and  add  to  its  starting  timecode  the
+difference between the specified offset and the starting position of the Timecode object in the track.
+ If  a  Source  Metadata  Object  has  more  than  one  timecode  Mob  Slot,  the  PhysicalChannelNumber
+property indicates the purpose of each as described in Table 4-1.
+ Physical Channel  Usage
+ 1  default TC
+ 2  Sound TC
+ 3  Aux. TC
+ 4  AuxTC2
+ 5  Aux TC3
+ 6  Aux TC4
+ 7  Aux TC5
+ Table 4-1: Physical Channel Number and Timecode Usage
+ Describing Edgecode
+ Film  edgecode  is  described  in  Film  Metadata  Objects.  Edgecode  is  specified  with  a  Timeline  Mob  Slot
+containing an Edgecode object. The Edgecode object specifies the starting edgecode value, the type of
+film, and the text egdecode header. If there is more than one edgecode Mob Slot, the purpose of each is
+described by the PhysicalChanneNumber property as described in Table 4-2.
+ Physical Channel  Usage
+ 1  Keycode #
+ 2  Ink Number
+ 3  Aux. Ink #
+AAF Specification Version 1.1        PRELIMINARY DRAFT 69
+ Table 4-2: Physical Channel Number and Timecode Usage
+
+
+
+
+
+ Timecode Class
+The Timecode class stores videotape or audio tape timecode information.
+The Timecode class is a subclass of the Segment class.
+Segment
+Timecode
++Start : Position
++FPS : UInt16
++Drop : Boolean
+A Timecode object shall have the required properties listed in the following table.
+Property Name Type Explanation
+Pref:Start PrefT:Position Specifies the timecode at the beginning of the
+segment. Required.
+Pref:FPS PrefT:UInt16 Frames  per  second  of  the  videotape  or  audio  tape.
+Required.
+Pref:Drop PrefT:Boolean Indicates whether the timecode is drop (True value) or
+nondrop (False value). Required.
+Note A Timecode object can typically appear in either a Source Mob or in a
+Composition Mob. In a Source Mob, it typically appears in a Mob Slot in a Source Mob
+that  describes  a  videotape  or  audio  tape.  In  this  context,  it  describes  the  timecode  that
+exists on the tape. In a Composition Mob, it represents the timecode associated with the
+virtual media represented by the Composition Mob. If the Composition Mob is rendered
+to a videotape, the Timecode should be used to generate the timecode on the videotape.
+AAF Specification Version 1.1        PRELIMINARY DRAFT 173
+TimecodeStream Class
+TimecodeStream specifies as stream of timecode data.
+TimecodeStream  is  an  abstract  class  and  is  a  subclass  of  Segment.  TimecodeStream  always  has  a
+timecode DataDefinition. TimecodeStream has a subclass TimecodeStream12M.
+Segment
+TimecodeStream
++SampleRate : Rational
++Source : DataValue
++SourceType : TCSource
+A TimcodeStream object shall have the required properties and may have the optional properties listed
+in the following table.
+Property Name Type Explanation
+Pref:SampleRate PrefT:Rational Specifies the sample rate of the timecode data
+contained in the Source property.  Required.
+Pref:Source PrefT:DataStream Contains the timecode data. Required
+Pref:SourceType PrefT:TCSource Specifies the kind of timecode:
+1 LTC timecode
+2 VITC timecode
+Required.
+TimecodeStream specifies a stream of timecode data.
+In  contrast  to  TimecodeStream,  Timecode  specifies  a  timecode  by  specifying  the  starting  timecode
+value; other timecode values are calculated from the starting timecode and the time offset.
+TimecodeStream  is  useful  to  store  user  bits  that  were  specified  in  the  timecode  on  the  videotape.  It  is
+also useful to store timecode when the timecode does not have a linear relationship with the tape, such
+as when the tape was accelerating while the essence data was recorded.
+174 PRELIMINARY DRAFT AAF Specification Version 1.1
+TimecodeStream12M Class
+TimecodeStream12M specifies a stream of timecode data in the SMPTE 12M format.
+Timecode12M is a subclass of Timecode. Timecode objects always have a timecode DataDefinition and
+can be used in aTimelineMob.
+TimecodeStream
+TimecodeStream12M
++IncludeSync : Boolean
+A TimecodeStreamObject shall have the required properties and may have the optional properties listed
+in the following table.
+Property Name Type Explanation
+Pref:IncludeSync PrefT:Boolean Specifies whether the synchronization data is included
+in the timecode stream.  Required.
+TimecodeStream  and  TimecodeStream12M  specify  a  stream  of  timecode  data.  TimecodeStream12M
+conforms  to  the  SMPTE  12M  format.  If  the  IncludeSync  property  has  a  true  value,  the  synchronization
+data is included for each frame. If the IncludeSync property is false, the synchronization data, which has
+a fixed value, is omitted from the timecode stream.
+In  contrast  to  TimecodeStream,  Timecode  specifies  a  timecode  by  specifying  the  starting  timecode
+value; other timecode values are calculated from the starting timecode and the time offset.
+TimecodeStream  is  useful  to  store  user  bits  that  were  specified  in  the  timecode  on  the  videotape.  It  is
+also useful to store timecode when the timecode does not have a linear relationship with the tape, such
+as when the tape was accelerating while the essence data was recorded.
+TimelineMobSlot Class
+TimelineMobSlot describes time-varying timeline essence.
+TimelineMobSlot is a subclass of MobSlot. MobSlot objects are owned by Mob objects.
+AAF Specification Version 1.1        PRELIMINARY DRAFT 175
+MobSlot
+TimelineMobSlot
++EditRate : Rational
++Origin : Position
+A TimelineMobSlot shall have the required properties listed in the following table.
+Property Name Type Explanation
+Pref:EditRate PrefT:Rational Specifies  the  units  of  time  for  the  TimelineMobSlot.
+Required.
+Pref:Origin PrefT:Position Specifies the offset used to resolve SourceClip
+references to this TimelineMobSlot. Required.
+The TimelineMobSlot specifies the edit rate for the Segment it has. The Segment specifies its length in
+the edit rate set by the TimelineMobSlot. The Segment also specifies its own data kind.
+Transition Class
+The  Transition  class  specifies  that  the  two  adjacent  Segments  should  be  overlapped  when  they  are
+played and the overlapped sections should be combined using the specified Effect.
+The Transition class is a subclass of the Component class.
+A Transition object shall be in a Sequence within a Composition Mob.
+176 PRELIMINARY DRAFT AAF Specification Version 1.1
+Component
+Transition
++Effect : StrongReference
++CutPoint : Position
+OperationGroup
+A Transition object shall have the required properties listed in the following table.
+Property Name Type Explanation
+Pref:Effect StrongReference to
+OperationGroup
+Has  an  OperationGroup  that  specifies  the  effect  to  be
+performed during the Transition. Required.
+Pref:CutPoint Position Specifies  a  cutpoint  to  use  if  replacing  the  Transition
+with a cut. Required.
+Note 1 A Transition object specifies that sections of the preceding and following
+segments  overlap  for  the  duration  of  the  Transition.  The  effect  combines  the  essence
+from the overlapping sections in some way.
+Note 2 The Transition cut point has no direct effect on the results produced by a
+Transition.  However,  the  cut  point  provides  information  that  is  useful  if  an  application
+wishes to remove the Transition or substitute a cut when playing the Transition. The cut
+point  is  represented  as  an  offset  from  the  beginning  of  the  Transition.  When  removing
+the Transition, an application would change the Composition Mob so that the preceding
+Segment ends where the cutpoint is located, and the succeeding Segment starts at that
+location. This can be done by trimming the end of the preceding Segment by an amount
+equal to the Transition length minus the cut point offset, and trimming the beginning of
+the succeeding Segment by an amount equal to the cut point offset
+
+
+CompositionMob Class
+The  CompositionMob  class  specifies  how  to  combine  content  data  elements  into  a  sequence,  how  to
+modify content data elements, and how to synchronize content data elements.
+The CompositionMob class is a subclass of the Mob class.
+100 PRELIMINARY DRAFT AAF Specification Version 1.1
+Mob
+CompositionMob
++DefaultFadeLength : Length
++DefaultFadeType : FadeType
++DefaultFadeEditUnit : Rational
+A CompositionMob object shall have the required properties and may have the optional properties listed
+in the following table.
+Property Name Type Explanation
+Pref:DefaultFadeLength PrefT:Length Specifies  the  default  length  of  the  audio  fade-in
+and fade-out to be applied to all audio
+SourceClips  that  do  not  specify  the  audio  fade
+properties. Optional; if specified, then the default
+fade  type  and  the  default  fade  edit  units  must
+also be specified.
+Pref:DefaultFadeType PrefT:FadeType Specifies the default type of audio fade. Optional;
+if  specified,  then  the  default  length  and  default
+edit  units  must  also  be  specified.  Specifies  the
+type  of  the  audio  fade  in;  may  have  one  of  the
+following values:
+0 No fade
+1 Linear amplitude fade
+2 Linear power fade
+3 Linear dB fade
+Additional  registered  and  private  fade  in  types
+may be defined. Optional.
+Pref:DefaultFadeEditUnit PrefT:Rational Specifies  the  edit  units  in  which  the  default  fade
+length is specified. Optional; if specified, then the
+default  fade  length  and  default  fade  type  must
+also be specified.
+1. A CompositionMob object shall have one or more MobSlots
+2. A ContentStorage may have any number of composition mobs.

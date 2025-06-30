@@ -71,11 +71,20 @@ void exportToCSV(const ProjectData& projectData, const std::string& filename) {
     // Счетчик файлов для генерации правильных имен
     std::unordered_map<std::string, int> fileCounters;
     
-    // Заголовок CSV
+    // Добавляем метаинформацию в начало файла в виде комментариев
+    csv << "# AAF Project Export" << std::endl;
+    csv << "# Project Name: " << projectData.projectName << std::endl;
+    csv << "# Session Start Timecode (frames): " << std::fixed << std::setprecision(0) << projectData.sessionStartTimecode << std::endl;
+    csv << "# Total Project Length: " << std::fixed << std::setprecision(3) << projectData.totalLength << " seconds" << std::endl;
+    csv << "# Sample Rate: " << projectData.sampleRate << " Hz" << std::endl;
+    csv << "# Channel Count: " << projectData.channelCount << std::endl;
+    csv << "#" << std::endl;
+    
+    // Заголовок CSV - добавляем поля для fade-событий
     csv << "TrackIndex,TrackName,TrackType,TrackVolume,TrackPan,TrackMute,TrackSolo,"
         << "ClipFileName,ClipMobID,ClipTimelineStart,ClipTimelineEnd,ClipSourceStart,"
         << "ClipLength,ClipGain,ClipVolume,ClipPan,ClipEffects,"
-        << "FadeInLength,FadeOutLength,CrossfadeLength,FadeInType,FadeOutType" << std::endl;
+        << "EventType,EventStart,EventLength,EventShape" << std::endl;
     
     // Экспортируем данные треков и клипов
     for (const auto& track : projectData.tracks) {
@@ -88,43 +97,71 @@ void exportToCSV(const ProjectData& projectData, const std::string& filename) {
                 << std::fixed << std::setprecision(3) << track.pan << ","
                 << (track.mute ? "true" : "false") << ","
                 << (track.solo ? "true" : "false") << ","
-                << ",,,,,,,,,,,,,,," << std::endl; // Пустые поля для клипа
+                << ",,,,,,,,,,,,," << std::endl; // Пустые поля для клипа и событий
         } else {
             // Трек с клипами
             for (const auto& clip : track.clips) {
                 // Генерируем правильное имя файла с суффиксом
                 std::string actualFileName = generateProperFileNameForCSV(clip.fileName, fileCounters);
                 
-                csv << track.trackIndex << ","
-                    << "\"" << track.trackName << "\","
-                    << "\"" << track.trackType << "\","
-                    << std::fixed << std::setprecision(3) << track.volume << ","
-                    << std::fixed << std::setprecision(3) << track.pan << ","
-                    << (track.mute ? "true" : "false") << ","
-                    << (track.solo ? "true" : "false") << ","
-                    << "\"" << actualFileName << "\","  // Используем сгенерированное имя
-                    << "\"" << clip.mobID << "\","
-                    << std::fixed << std::setprecision(3) << clip.timelineStart << ","
-                    << std::fixed << std::setprecision(3) << clip.timelineEnd << ","
-                    << std::fixed << std::setprecision(3) << clip.sourceStart << ","
-                    << std::fixed << std::setprecision(3) << clip.length << ","
-                    << std::fixed << std::setprecision(3) << clip.gain << ","
-                    << std::fixed << std::setprecision(3) << clip.volume << ","
-                    << std::fixed << std::setprecision(3) << clip.pan << ",";
+                // Базовая строка с информацией о клипе
+                std::string baseClipData = 
+                    std::to_string(track.trackIndex) + ","
+                    + "\"" + track.trackName + "\","
+                    + "\"" + track.trackType + "\","
+                    + std::to_string(track.volume) + ","
+                    + std::to_string(track.pan) + ","
+                    + (track.mute ? "true" : "false") + ","
+                    + (track.solo ? "true" : "false") + ","
+                    + "\"" + actualFileName + "\","
+                    + "\"" + clip.mobID + "\","
+                    + std::to_string(clip.timelineStart) + ","
+                    + std::to_string(clip.timelineEnd) + ","
+                    + std::to_string(clip.sourceStart) + ","
+                    + std::to_string(clip.length) + ","
+                    + std::to_string(clip.gain) + ","
+                    + std::to_string(clip.volume) + ","
+                    + std::to_string(clip.pan) + ","
+                    + "\""; // Начало поля effects
                 
                 // Эффекты (объединяем в одну строку)
-                csv << "\"";
+                std::string effectsString;
                 for (size_t i = 0; i < clip.effects.size(); ++i) {
-                    if (i > 0) csv << "; ";
-                    csv << clip.effects[i];
+                    if (i > 0) effectsString += "; ";
+                    effectsString += clip.effects[i];
                 }
-                csv << "\"," 
-                    << std::fixed << std::setprecision(3) << clip.fadeInLength << ","
-                    << std::fixed << std::setprecision(3) << clip.fadeOutLength << ","
-                    << std::fixed << std::setprecision(3) << clip.crossfadeLength << ","
-                    << "\"" << clip.fadeInType << "\","
-                    << "\"" << clip.fadeOutType << "\""
-                    << std::endl;
+                
+                bool hasAnyFade = (clip.fadeInLength > 0.0 || clip.fadeOutLength > 0.0);
+                
+                // Основная запись клипа (без fade-событий)
+                csv << std::fixed << std::setprecision(3) << baseClipData << effectsString << "\",";
+                if (!hasAnyFade) {
+                    csv << "CLIP,,," << std::endl;
+                } else {
+                    csv << "CLIP,,," << std::endl;
+                }
+                
+                // Fade-in событие (если есть)
+                if (clip.fadeInLength > 0.0) {
+                    csv << std::fixed << std::setprecision(3) << baseClipData << effectsString << "\",";
+                    csv << "FADE_IN," << clip.timelineStart << "," << clip.fadeInLength << ","
+                        << "\"" << clip.fadeInType << "\"" << std::endl;
+                }
+                
+                // Fade-out событие (если есть)
+                if (clip.fadeOutLength > 0.0) {
+                    double fadeOutStart = clip.timelineEnd - clip.fadeOutLength;
+                    csv << std::fixed << std::setprecision(3) << baseClipData << effectsString << "\",";
+                    csv << "FADE_OUT," << fadeOutStart << "," << clip.fadeOutLength << ","
+                        << "\"" << clip.fadeOutType << "\"" << std::endl;
+                }
+                
+                // Crossfade событие (если есть)
+                if (clip.crossfadeLength > 0.0) {
+                    csv << std::fixed << std::setprecision(3) << baseClipData << effectsString << "\",";
+                    csv << "CROSSFADE," << clip.timelineStart << "," << clip.crossfadeLength << ","
+                        << "\"Linear\"" << std::endl;
+                }
             }
         }
     }

@@ -4,6 +4,19 @@
 #include <vector>
 #include <AAFTypes.h>
 
+// Структура для fade-событий
+struct FadeEvent {
+    std::string eventType;    // "FADE_IN", "FADE_OUT", "CROSSFADE"
+    aafPosition_t startTime;  // Начальная позиция в samples
+    aafLength_t duration;     // Длительность в samples
+    std::string shape;        // "Linear", "Exponential", "Logarithmic", "Custom"
+    double startValue;        // Начальное значение амплитуды (0.0-1.0)
+    double endValue;          // Конечное значение амплитуды (0.0-1.0)
+    
+    FadeEvent() : eventType(""), startTime(0), duration(0), shape("Linear"), 
+                  startValue(0.0), endValue(1.0) {}
+};
+
 // Простые структуры для экспорта в CSV
 struct AudioClipData {
     std::string fileName;
@@ -87,6 +100,8 @@ struct AAFAudioClipInfo {
     bool hasFadeOut;
     aafLength_t fadeInLength;
     aafLength_t fadeOutLength;
+    std::string fadeInType;        // Тип fade-in ("Linear Amplitude", "Linear Power", "None")
+    std::string fadeOutType;       // Тип fade-out ("Linear Amplitude", "Linear Power", "None")
 };
 
 // Структура для хранения информации об аудио треке
@@ -96,6 +111,7 @@ struct AAFAudioTrackInfo {
     aafRational_t editRate;
     aafPosition_t origin;
     std::vector<AAFAudioClipInfo> clips;
+    std::vector<FadeEvent> fadeEvents;  // Fade-события для трека
     
     // Трек свойства
     double volume;

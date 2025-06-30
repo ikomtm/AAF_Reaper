@@ -3,6 +3,9 @@
 #include "data_structures.h"
 #include "debug_logger.h"
 #include <AAF.h>
+#include <AAFOperationDefs.h>
+#include <AAFParameterDefs.h>
+#include <vector>
 
 // Forward declarations
 class AAFAudioProperties;
@@ -29,6 +32,17 @@ public:
 
     // Поиск FileSourceMob из MasterMob
     IAAFSourceMob* findFileSourceMobFromMaster(IAAFMob* pMasterMob);
+    
+    // Извлечение fade-информации из SourceClip (новая реализация)
+    void extractSourceClipFades(IAAFSourceClip* pSourceClip, AAFAudioClipInfo& clipInfo);
+    
+    // Обработка Transition для поиска crossfade
+    void processTransitionForCrossfade(IAAFTransition* pTransition, 
+                                      AAFAudioTrackInfo& trackInfo, 
+                                      aafPosition_t currentPosition);
+
+    // --- Descriptive Metadata logging ---
+    void logDescriptiveMetadata(IAAFMob* pMob, const std::string& context);
 
 private:
     IAAFHeader* m_pHeader;

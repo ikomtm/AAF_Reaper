@@ -1,0 +1,221 @@
+Transitions
+ A Transition can occur in a Sequence between two Segments. The Transition causes the preceding and
+following  Segments  to  overlap  in  time.  The  Transition  specifies  an  effect  that  is  used  to  combine  the
+overlapping Segments. Figure 3-2 illustrates the Sequence containment showing Transition, which itself
+has an Effect.
+ 
+AAF Specification Version 1.1        PRELIMINARY DRAFT 43
+ 
+Sequence
+Segment
+1..*
+{ordered}
+OperationGroup Filler NestedScope ScopeReference Sequence SourceClip
+Component
+Transition
+OperationGroup
+{Transitions occur between
+two Segments}
+Selector
+ Figure 3-2: Containment Diagram of Sequence with Transition
+ Figure 3-3 shows an instance diagram of a Sequence containing Source Clips and a Transition. It shows
+the timeline view of the Sequence, in which the Transitions cause the two Source Clips to overlap
+44 PRELIMINARY DRAFT AAF Specification Version 1.1
+ 
+th = 100
+urceClip
+SourceClip
++Length : Length = 80
+SourceClip
++Length : Length = 100
+CompositionMob
+TimelineMobSlot
+Sequence
++Length : Length = 230
+Transition
++Length : Length = 75
+SourceClip
++Length : Length = 125
+SourceClip
+Length : Length = 100
+SourceClip
+Length : Length = 125
+SourceClip
+Length : Length = 80
+Transition
+Length : Length = 75
+SourceClip
+Length : Length = 80
+SourceClip
+Length : Lengt
+Transition
+Length : Length = 75
+Timeline View
+0 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+ Figure 3-3: Transition Cause Segments to Overlap
+ To  calculate  the  duration  of  a  Sequence  with  Transitions,  you  add  the  durations  of  the  Segments  and
+then subtract the duration of the Transitions. In the example in Figure 3-3, the duration of the Sequence
+is 125 + 100 + 80 —  75, which equals 230.
+AAF Specification Version 1.1        PRELIMINARY DRAFT 45
+ If you are inserting a Transition between two Source Clips, and you want to preserve the overall duration
+of the two Segments, you must adjust the Source Clip’s Length and StartTime values.
+ Cuts and the Transition Cut Point
+ Transitions  also  specify  a  CutPoint.  The  CutPoint  has  no  direct  effect  on  the  results  specified  by  a
+Transition,  but  the  CutPoint  provides  information  that  is  useful  if  an  application  wishes  to  remove  or
+temporarily  replace  the  transition.  The  CutPoint  represents  the  time  within  the  Transition  that  the
+preceding Segment should end and the following one begins, if you remove the Transition and replace it
+with  a  cut.  To  remove  a  Transition  and  preserve  the  absolute  time  positions  of  both  Segments,  your
+application should trim the end of the preceding Segment by an amount equal to the Transition Length
+minus the CutPoint offset, and trim the beginning of the succeeding Segment by an amount equal to the
+CutPoint offset.
+ Treating Transitions As Cuts
+ If you cannot play a Transition’s effect, you should treat it as a cut. Treating it as a cut means that you
+should play the two Segments surrounding the transition as if they had been trimmed, as described in the
+preceding paragraphs. If you play the two Segments without trimming, the total elapsed time for them will
+be greater than it should be, which can cause synchronization problems.
+ Restriction on Overlapping Transitions
+ Transitions can occur only between two Segments. In addition, the Segment that precedes the Transition
+and the Segment that follows the Transition must each have a Length that is greater than or equal to the
+Length of the Transition. If a Segment has a Transition before it and after it, the Segment’s Length must
+be  greater  than  or  equal  to  the  sum  of  the  Length  of  each  of  the  two  Transitions.  This  ensures  that
+Transitions do not overlap. These restrictions allow applications to treat Transitions in a uniform manner
+and to avoid ambiguous constructions.
+ It  is  possible  to  create  Sequences  that  appear  to  start  or  end  with  Transitions  or  that  appear  to  have
+overlapping  Transitions.  To  create  the  appearance  of  a  Transition  at  the  beginning  of  a  Sequence,
+precede  the  Transition  with  a  Filler  object  that  has  the  same  length  as  the  Transition.  To  create  the
+appearance of a Transition at the end of a Sequence, follow the Transition with a Filler object that has
+the same length as the Transition.
+ To  create  the  appearance  of  overlapping  Transitions,  you  nest  the  Transitions  by  using  a  Sequence
+within  another  Sequence.  You  can  put  two  Segments  separated  by  a  Transition  in  the  inner  Sequence.
+Then  you  can  use  this  Sequence  object  as  the  Segment  before  or  after  another  Transition.  The
+Transitions will appear to be overlapping
+
+Using Audio Fade In and Fade Out
+ The Source Clip FadeInLength, FadeInType, FadeOutLength, and FadeOutType properties allow you to
+specify  audio  fades  without  an  Effect  object.  Audio  fades  use  these  Source  Clip  properties  instead  of
+Effect properties of the Effect for the following reasons:
+• Some applications use audio fades on every Segment of audio to avoid noise when cutting from
+one  audio  Segment  to  another.  Using  the  Source  Clip  properties  rather  than  Effect  properties
+simplifies the Composition Metadata Object structure.
+• Audio fades typically have simple controls arguments and do not need the time-varying control
+arguments that are allowed in Effects.
+However, if you want to create a crossfade, you need to do one of the following:
+• Insert a Transition object with the MonoAudioMixdown effect between the two audio source clips
+to cause them to overlap. If the FadeOutLength of the preceding Source Clip is not equal to the
+FadeInLength of the following Source Clip, the crossfade will be asymmetric.
+ Specify the overlapping audio Source Clips as different input essence Segments in a
+MonoAudioMixdown of an Effect.
+ 
+OperationGroup Class
+The  OperationGroup  class  contains  an  ordered  set  of  Segments  and  an  operation  that  is  performed  on
+these Segments.
+The OperationGroup class is a subclass of the Segment class
+An OperationGroup object can only be part of a Composition mob.
+Segment
+OperationGroup
++Operation : WeakReference
++InputSegments : StrongReferenceVector
++Parameters : StrongReferenceSet
++Rendering : StrongReference
+0..*
+Parameters
+SourceReference
+Rendering
+Parameter
+Operation
+Segment0..*
+InputSegments {ordered}
+OperationDefinition
+144 PRELIMINARY DRAFT AAF Specification Version 1.1
+An  Effect  object  shall  have  the  required  properties  and  may  have  the  optional  properties  listed  in  the
+following table.
+Property Name Type Explanation
+Pref:
+OperationDefinition
+PrefT:WeakReference
+to OperationDefinition
+Has a weak reference to an Operation
+Definition that identifies the kind of
+operation. Required.
+Pref:InputSegments PrefT:
+StrongReferenceVector
+of Segment
+Has  an  array  of  input    segments  for  the
+operation. Optional.
+Pref:Parameters PrefT:
+StrongReferenceSet of
+Parameter
+Has a set of control Parameters. Optional.
+Pref:Rendering PrefT:StrongReference
+to SourceReference
+Specifies a rendered or precomputed version
+of the operation. Optional.
+1. In all Effect objects, the length of the Rendering Source Clip must each equal the length of the
+Effect.
+2. In Effect objects whose Effect Definition object does not specify a time warp the length of each
+input  Segment each equal the length of the Effect.
+Parameter Class
+Parameter class specifies a control argument for an effect.
+Parameter class is a subclass of Object. Parameter objects are owned by Effect objects.
+Parameter is an abstract class; consequently, any object that belongs to the Parameter class shall also
+belong to a subclass of Parameter.
+AAF Specification Version 1.1        PRELIMINARY DRAFT 145
+Parameter
++Definition : WeakReference
++Type : WeakReference
+InterchangeObject
+TypeDefinition
+ParameterDefinition
+A Parameter object shall have the required properties listed in the following table.
+Property Name Type Explanation
+Pref:Definition PrefT:WeakReference
+to ParameterDefinition
+Identifies the Parameter. Required.
+Pref:Type PrefT:WeakReference
+to TypeDefinition
+Specifies  the  type  of  data  that  can  be  stored  in  the
+Parameter. Required.
+1.  A  Parameter  shall  specify  the  same  TypeDefinition  as  specified  by  the  ParameterDefinition  that  is
+referenced in the EffectSlot.
+A  Parameter  object  is  an  effect  control,  which  specifies  values  for  adjustments  in  the  way  the  effect
+should be performed.
+An  effect  can  have  constant  control  parameters  or  have  control  parameters  whose  values  vary  over
+time.  For  example,  a  picture-in-picture  effect  where  the  size  and  transparency  of  the  inserted  picture
+stays constant throughout the effect has constant control parameters, but a picture-in-picture effect that
+starts  with  a  small  inserted  picture  that  grows  larger  during  the  effect  has  control  arguments  with  time-
+varying values.
+A  constant  control  argument  can  be  specified  with  a  Constant  Value  object.  A  time-varying  value  is
+specified with a Varying Value object.
+
+
+Transition Class
+The  Transition  class  specifies  that  the  two  adjacent  Segments  should  be  overlapped  when  they  are
+played and the overlapped sections should be combined using the specified Effect.
+The Transition class is a subclass of the Component class.
+A Transition object shall be in a Sequence within a Composition Mob.
+176 PRELIMINARY DRAFT AAF Specification Version 1.1
+Component
+Transition
++Effect : StrongReference
++CutPoint : Position
+OperationGroup
+A Transition object shall have the required properties listed in the following table.
+Property Name Type Explanation
+Pref:Effect StrongReference to
+OperationGroup
+Has  an  OperationGroup  that  specifies  the  effect  to  be
+performed during the Transition. Required.
+Pref:CutPoint Position Specifies  a  cutpoint  to  use  if  replacing  the  Transition
+with a cut. Required.
+Note 1 A Transition object specifies that sections of the preceding and following
+segments  overlap  for  the  duration  of  the  Transition.  The  effect  combines  the  essence
+from the overlapping sections in some way.
+Note 2 The Transition cut point has no direct effect on the results produced by a
+Transition.  However,  the  cut  point  provides  information  that  is  useful  if  an  application
+wishes to remove the Transition or substitute a cut when playing the Transition. The cut
+point  is  represented  as  an  offset  from  the  beginning  of  the  Transition.  When  removing
+the Transition, an application would change the Composition Mob so that the preceding
+Segment ends where the cutpoint is located, and the succeeding Segment starts at that
+location. This can be done by trimming the end of the preceding Segment by an amount
+equal to the Transition length minus the cut point offset, and trimming the beginning of
+the succeeding Segment by an amount equal to the cut point offset.

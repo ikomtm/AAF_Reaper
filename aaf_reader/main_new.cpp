@@ -13,6 +13,7 @@
 #include <map>
 #include <memory>
 #include <iomanip>
+#include <cmath>
 #include <chrono>
 
 // Наши модули
@@ -146,7 +147,18 @@ int main(int argc, char* argv[]) {
     
     // Преобразуем данные в формат ProjectData для CSV экспорта
     projectData.projectName = "AAF_Import_Project";
-    projectData.sessionStartTimecode = 0.0;
+    
+    // Получаем стартовый таймкод сессии из Composition Mob
+    IAAFMob* pCompositionMob = findCompositionMob(pHeader);
+    if (pCompositionMob) {
+        aafPosition_t startTimecode = getCompositionStartTimecode(pCompositionMob);
+        projectData.sessionStartTimecode = static_cast<double>(startTimecode);
+        out << "[*] Session start timecode: " << startTimecode << " (frames)" << std::endl;
+        pCompositionMob->Release();
+    } else {
+        projectData.sessionStartTimecode = 0.0;
+        out << "[*] No Composition Mob found, using default start timecode: 0" << std::endl;
+    }
     
     int totalClips = 0;
     for (size_t trackIdx = 0; trackIdx < parsedTracks.size(); ++trackIdx) {
@@ -172,9 +184,11 @@ int main(int argc, char* argv[]) {
             // Фейды
             if (parsedClip.hasFadeIn) {
                 clipData.fadeInLength = (double)parsedClip.fadeInLength / parsedTrack.editRate.numerator * parsedTrack.editRate.denominator;
+                clipData.fadeInType = parsedClip.fadeInType;
             }
             if (parsedClip.hasFadeOut) {
                 clipData.fadeOutLength = (double)parsedClip.fadeOutLength / parsedTrack.editRate.numerator * parsedTrack.editRate.denominator;
+                clipData.fadeOutType = parsedClip.fadeOutType;
             }
             
             // Эффекты
@@ -184,12 +198,61 @@ int main(int argc, char* argv[]) {
             totalClips++;
         }
         
+        // Обрабатываем crossfade события для трека
+        for (const FadeEvent& fadeEvent : parsedTrack.fadeEvents) {
+            if (fadeEvent.eventType == "CROSSFADE") {
+                // Ищем клип, который начинается в позиции crossfade
+                double crossfadeTimeSeconds = (double)fadeEvent.startTime / parsedTrack.editRate.numerator * parsedTrack.editRate.denominator;
+                double crossfadeLengthSeconds = (double)fadeEvent.duration / parsedTrack.editRate.numerator * parsedTrack.editRate.denominator;
+                
+                // Добавляем crossfade к клипу, который находится в этой позиции
+                for (AudioClipData& clipData : trackData.clips) {
+                    if (fabs(clipData.timelineStart - crossfadeTimeSeconds) < 0.1) { // Небольшая погрешность
+                        clipData.crossfadeLength = crossfadeLengthSeconds;
+                        break;
+                    }
+                }
+            }
+        }
+        
         projectData.tracks.push_back(trackData);
         audioTrackCount++;
         audioClipCount += static_cast<int>(trackData.clips.size());
     }
     
     out << "[*] Processed " << audioTrackCount << " tracks with " << totalClips << " clips total" << std::endl;
+
+    // Вычисляем смещение стартового таймкода в секундах
+    // Используем edit rate первого трека для конвертации фреймов в секунды
+    double timecodeOffsetSeconds = 0.0;
+    if (!parsedTracks.empty() && projectData.sessionStartTimecode != 0.0) {
+        const AAFAudioTrackInfo& firstTrack = parsedTracks[0];
+        // Правильная формула: frames * (denominator / numerator) = seconds
+        timecodeOffsetSeconds = projectData.sessionStartTimecode * firstTrack.editRate.denominator / firstTrack.editRate.numerator;
+        out << "[*] Timecode offset: " << projectData.sessionStartTimecode << " frames = " 
+            << std::fixed << std::setprecision(3) << timecodeOffsetSeconds << " seconds" << std::endl;
+        out << "[*] Edit rate: " << firstTrack.editRate.numerator << "/" << firstTrack.editRate.denominator << std::endl;
+    }
+
+    // Применяем смещение таймкода ко всем клипам
+    if (timecodeOffsetSeconds > 0.0) {
+        out << "[*] Applying timecode offset of " << std::fixed << std::setprecision(3) 
+            << timecodeOffsetSeconds << " seconds to all clips..." << std::endl;
+        for (auto& track : projectData.tracks) {
+            for (auto& clip : track.clips) {
+                double oldStart = clip.timelineStart;
+                double oldEnd = clip.timelineEnd;
+                clip.timelineStart += timecodeOffsetSeconds;
+                clip.timelineEnd += timecodeOffsetSeconds;
+                out << "[*] Clip '" << clip.fileName << "': " 
+                    << oldStart << "-" << oldEnd << " -> " 
+                    << clip.timelineStart << "-" << clip.timelineEnd << std::endl;
+            }
+        }
+        out << "[*] Applied timecode offset to all clips" << std::endl;
+    } else {
+        out << "[*] No timecode offset applied (offset=" << timecodeOffsetSeconds << " seconds)" << std::endl;
+    }
 
     // Вычисляем общую длительность проекта
     for (const auto& track : projectData.tracks) {
@@ -234,6 +297,7 @@ int main(int argc, char* argv[]) {
     }
     out << "Total clips exported: " << totalClipsExported << std::endl;
     out << "Project length: " << std::fixed << std::setprecision(3) << projectData.totalLength << "s" << std::endl;
+    out << "Session start timecode: " << std::fixed << std::setprecision(0) << projectData.sessionStartTimecode << " frames" << std::endl;
 
     // Освобождаем ресурсы
     pHeader->Release();

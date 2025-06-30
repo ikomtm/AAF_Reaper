@@ -12,6 +12,58 @@
 -- Скрипт автоматически найдет извлеченные файлы в папке extracted_media/
 -- и импортирует их в правильном порядке согласно CSV файлу
 
+-- Функция для чтения метаданных из CSV комментариев
+local function readCSVMetadata(csvPath)
+    local metadata = {
+        projectName = "",
+        sessionStartTimecode = 0,
+        totalLength = 0,
+        sampleRate = 48000,
+        channelCount = 2
+    }
+    
+    local file = io.open(csvPath, "r")
+    if not file then
+        reaper.ShowConsoleMsg("ERROR: Could not open CSV file: " .. csvPath .. "\n")
+        return metadata
+    end
+    
+    -- Читаем комментарии в начале файла
+    for line in file:lines() do
+        if line:sub(1, 1) ~= "#" then
+            break -- Закончились комментарии
+        end
+        
+        -- Парсим метаданные
+        if line:find("Project Name:") then
+            metadata.projectName = line:match("Project Name:%s*(.+)")
+        elseif line:find("Session Start Timecode %(frames%):") then
+            local timecode = line:match("Session Start Timecode %(frames%):%s*(%d+)")
+            if timecode then
+                metadata.sessionStartTimecode = tonumber(timecode)
+            end
+        elseif line:find("Total Project Length:") then
+            local length = line:match("Total Project Length:%s*([%d%.]+)")
+            if length then
+                metadata.totalLength = tonumber(length)
+            end
+        elseif line:find("Sample Rate:") then
+            local rate = line:match("Sample Rate:%s*([%d%.]+)")
+            if rate then
+                metadata.sampleRate = tonumber(rate)
+            end
+        elseif line:find("Channel Count:") then
+            local count = line:match("Channel Count:%s*(%d+)")
+            if count then
+                metadata.channelCount = tonumber(count)
+            end
+        end
+    end
+    
+    file:close()
+    return metadata
+end
+
 -- Функция для поиска извлеченного файла (упрощенная версия)
 local function findExtractedFile(fileName, extractedDir)
     reaper.ShowConsoleMsg("    Searching for: " .. fileName .. "\n")
@@ -84,11 +136,26 @@ local function readCSVFile(filename)
     local currentTrackIndex = -1
     local currentTrack = nil
     
-    -- Читаем заголовок
-    local header = file:read("*line")
+    -- Пропускаем комментарии и читаем заголовок
+    local header = nil
+    while true do
+        local line = file:read("*line")
+        if not line then
+            file:close()
+            reaper.ShowMessageBox("No data found in CSV file", "Error", 0)
+            return nil
+        end
+        
+        -- Пропускаем строки, начинающиеся с # (комментарии)
+        if line:sub(1, 1) ~= "#" and line:trim() ~= "" then
+            header = line
+            break
+        end
+    end
+    
     if not header then
         file:close()
-        reaper.ShowMessageBox("Empty CSV file", "Error", 0)
+        reaper.ShowMessageBox("No header found in CSV file", "Error", 0)
         return nil
     end
     
@@ -98,7 +165,8 @@ local function readCSVFile(filename)
     
     -- Проверяем обязательные колонки
     local expectedColumns = {"TrackIndex", "TrackName", "TrackType", "Volume", "Pan", 
-                           "ClipFileName", "TimelineStart", "Length", "SourceStart", "Gain"}
+                           "ClipFileName", "TimelineStart", "Length", "SourceStart", "Gain",
+                           "EventType", "EventStart", "EventLength", "EventShape"}
     
     -- Читаем данные
     local lineNumber = 1
@@ -108,7 +176,7 @@ local function readCSVFile(filename)
         if line:trim() ~= "" then
             local fields = parseCSVLine(line)
             
-            if #fields >= 16 then
+            if #fields >= 20 then  -- Увеличили минимальное количество полей
                 local trackIndex = tonumber(fields[1])
                 local trackName = fields[2]
                 local trackType = fields[3]
@@ -126,6 +194,10 @@ local function readCSVFile(filename)
                 local clipVolume = tonumber(fields[15]) or 1.0
                 local clipPan = tonumber(fields[16]) or 0.0
                 local effects = fields[17] or ""
+                local eventType = fields[18] or "CLIP"
+                local eventStart = tonumber(fields[19]) or 0
+                local eventLength = tonumber(fields[20]) or 0
+                local eventShape = fields[21] or ""
                 
                 -- Если новый трек
                 if trackIndex ~= currentTrackIndex then
@@ -138,38 +210,54 @@ local function readCSVFile(filename)
                         pan = trackPan,
                         mute = trackMute,
                         solo = trackSolo,
-                        clips = {}
+                        clips = {},
+                        fadeEvents = {}  -- Добавляем массив для fade-событий
                     }
                     table.insert(tracks, currentTrack)
                     reaper.ShowConsoleMsg("Found track " .. trackIndex .. ": " .. trackName .. "\n")
                 end
                 
-                -- Добавляем клип (если есть файл)
-                if clipFileName and clipFileName ~= "" then
-                    local clip = {
-                        fileName = clipFileName,
-                        timelineStart = timelineStart,
-                        timelineEnd = timelineEnd,
-                        length = length,
-                        sourceStart = sourceStart,
-                        gain = gain,
-                        volume = clipVolume,
-                        pan = clipPan,
-                        mobID = mobID,
-                        effects = {}
+                -- Обрабатываем различные типы событий
+                if eventType == "CLIP" then
+                    -- Добавляем клип (если есть файл)
+                    if clipFileName and clipFileName ~= "" then
+                        local clip = {
+                            fileName = clipFileName,
+                            timelineStart = timelineStart,
+                            timelineEnd = timelineEnd,
+                            length = length,
+                            sourceStart = sourceStart,
+                            gain = gain,
+                            volume = clipVolume,
+                            pan = clipPan,
+                            mobID = mobID,
+                            effects = {}
+                        }
+                        
+                        -- Парсим эффекты (разделенные ';')
+                        if effects ~= "" then
+                            for effect in effects:gmatch("[^;]+") do
+                                table.insert(clip.effects, effect)
+                            end
+                        end
+                        
+                        table.insert(currentTrack.clips, clip)
+                    end
+                elseif eventType == "FADE_IN" or eventType == "FADE_OUT" or eventType == "CROSSFADE" then
+                    -- Добавляем fade-событие
+                    local fadeEvent = {
+                        type = eventType,
+                        start = eventStart,
+                        length = eventLength,
+                        shape = eventShape,
+                        clipMobID = mobID  -- Связываем с клипом
                     }
                     
-                    -- Парсим эффекты (разделенные ';')
-                    if effects ~= "" then
-                        for effect in effects:gmatch("[^;]+") do
-                            table.insert(clip.effects, effect)
-                        end
-                    end
-                    
-                    table.insert(currentTrack.clips, clip)
+                    table.insert(currentTrack.fadeEvents, fadeEvent)
+                    reaper.ShowConsoleMsg("Found " .. eventType .. " at " .. eventStart .. " length " .. eventLength .. "\n")
                 end
             else
-                reaper.ShowConsoleMsg("Warning: Line " .. lineNumber .. " has only " .. #fields .. " fields (expected at least 16)\n")
+                reaper.ShowConsoleMsg("Warning: Line " .. lineNumber .. " has only " .. #fields .. " fields (expected at least 20)\n")
             end
         end
     end
@@ -237,6 +325,77 @@ local function findAudioFile(originalPath, csvPath)
     end
     
     return nil
+end
+
+-- Функция для применения fade-события к треку
+local function applyFadeEvent(track, fadeEvent)
+    reaper.ShowConsoleMsg("    Applying " .. fadeEvent.type .. " at " .. fadeEvent.start .. " length " .. fadeEvent.length .. "\n")
+    
+    -- Получаем количество медиа-элементов на треке
+    local numItems = reaper.CountTrackMediaItems(track)
+    
+    for i = 0, numItems - 1 do
+        local mediaItem = reaper.GetTrackMediaItem(track, i)
+        if mediaItem then
+            local itemStart = reaper.GetMediaItemInfo_Value(mediaItem, "D_POSITION")
+            local itemLength = reaper.GetMediaItemInfo_Value(mediaItem, "D_LENGTH")
+            local itemEnd = itemStart + itemLength
+            
+            -- Проверяем, попадает ли fade-событие в диапазон этого медиа-элемента
+            local fadeStart = fadeEvent.start
+            local fadeEnd = fadeEvent.start + fadeEvent.length
+            
+            -- Определяем пересечение
+            local overlapStart = math.max(itemStart, fadeStart)
+            local overlapEnd = math.min(itemEnd, fadeEnd)
+            
+            if overlapStart < overlapEnd then
+                -- Есть пересечение - применяем fade
+                reaper.ShowConsoleMsg("      Applying to item at " .. itemStart .. " (overlap: " .. overlapStart .. " - " .. overlapEnd .. ")\n")
+                
+                if fadeEvent.type == "FADE_IN" then
+                    -- Применяем fade-in
+                    local fadeInTime = overlapEnd - overlapStart
+                    reaper.SetMediaItemInfo_Value(mediaItem, "D_FADEINLEN", fadeInTime)
+                    reaper.SetMediaItemInfo_Value(mediaItem, "C_FADEINSHAPE", getFadeShape(fadeEvent.shape))
+                    
+                elseif fadeEvent.type == "FADE_OUT" then
+                    -- Применяем fade-out
+                    local fadeOutTime = overlapEnd - overlapStart
+                    reaper.SetMediaItemInfo_Value(mediaItem, "D_FADEOUTLEN", fadeOutTime)
+                    reaper.SetMediaItemInfo_Value(mediaItem, "C_FADEOUTSHAPE", getFadeShape(fadeEvent.shape))
+                    
+                elseif fadeEvent.type == "CROSSFADE" then
+                    -- Crossfade обычно применяется между двумя элементами
+                    -- В данном случае можем применить как fade-out к текущему элементу
+                    local crossfadeTime = overlapEnd - overlapStart
+                    reaper.SetMediaItemInfo_Value(mediaItem, "D_FADEOUTLEN", crossfadeTime)
+                    reaper.SetMediaItemInfo_Value(mediaItem, "C_FADEOUTSHAPE", 0) -- Linear
+                end
+            end
+        end
+    end
+end
+
+-- Функция для конвертации типа fade в номер формы для Reaper
+local function getFadeShape(shapeString)
+    -- Reaper fade shapes:
+    -- 0 = Linear
+    -- 1 = Fast start
+    -- 2 = Fast end
+    -- 3 = Slow start/end
+    -- 4 = Sharp curve
+    -- 5 = Slow curve
+    
+    if shapeString == "Linear" or shapeString == "1" then
+        return 0
+    elseif shapeString == "Fast start" or shapeString == "2" then
+        return 1
+    elseif shapeString == "Fast end" or shapeString == "3" then
+        return 2
+    else
+        return 0 -- По умолчанию linear
+    end
 end
 
 -- Главная функция импорта
@@ -375,6 +534,14 @@ local function importAAFFromCSV()
                     end
                 else
                     reaper.ShowConsoleMsg("    File not found: " .. clipData.fileName .. "\n")
+                end
+            end
+            
+            -- Применяем fade-события к созданным клипам
+            if trackData.fadeEvents then
+                reaper.ShowConsoleMsg("  Applying " .. #trackData.fadeEvents .. " fade events...\n")
+                for j, fadeEvent in ipairs(trackData.fadeEvents) do
+                    applyFadeEvent(track, fadeEvent)
                 end
             end
         else
