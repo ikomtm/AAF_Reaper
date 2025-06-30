@@ -16,6 +16,7 @@ set(SOURCES
     aaf_utils.cpp
     aaf_proper_parser.cpp
     aaf_clip_processor.cpp
+    aaf_fade_detector.cpp
     aaf_audio_properties.cpp
     aaf_essence_extractor.cpp
     media_utils.cpp
@@ -34,6 +35,7 @@ set(HEADERS
     media_utils.h
     csv_export.h
     debug_logger.h
+    aaf_fade_detector.h
 )
 
 # Основная программа AAF Reader
